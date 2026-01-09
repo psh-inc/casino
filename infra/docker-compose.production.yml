@@ -1,0 +1,171 @@
+# Casino Core - Production Docker Compose
+# Security-hardened configuration
+# Date: 2025-12-14
+#
+# Usage:
+# 1. Copy to server as docker-compose.yml
+# 2. Create /root/.env.casino with secrets (chmod 600)
+# 3. docker compose up -d
+
+version: '3.8'
+
+services:
+  app:
+    image: core-app:latest
+    container_name: casino-core
+    user: appuser
+    init: true
+
+    # Use bridge network instead of host network for isolation
+    networks:
+      - backend
+
+    # Only expose to localhost - nginx will proxy
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # Load secrets from secure env file
+    env_file:
+      - /root/.env.casino
+
+    environment:
+      # Spring Boot
+      - SPRING_PROFILES_ACTIVE=prod
+
+      # Frontend URLs
+      - FRONTEND_URL=https://betportal.com
+      - ALLOWED_ORIGINS=https://betportal.com,https://admin.betportal.com,https://dev.betportal.com
+
+      # Database (password from env file)
+      - POSTGRES_URL=host.docker.internal
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=casinocore
+      - POSTGRES_USER=postgres
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/casinocore
+      - SPRING_DATASOURCE_USERNAME=postgres
+      # SPRING_DATASOURCE_PASSWORD loaded from env_file
+
+      # Redis (password from env file)
+      - REDIS_HOST=host.docker.internal
+      - REDIS_PORT=6379
+      - SPRING_DATA_REDIS_HOST=host.docker.internal
+      # REDIS_PASSWORD loaded from env_file
+
+      # Server
+      - SERVER_PORT=8080
+      - SERVER_ADDRESS=0.0.0.0
+
+      # JWT (secret from env file)
+      # JWT_SECRET loaded from env_file
+
+      # Email
+      - EMAIL_FROM=${EMAIL_FROM}
+      - EMAIL_SUPPORT=${EMAIL_SUPPORT}
+
+      # Payment Provider
+      - PAYMENT_PROVIDER_NOTIFICATION_URL=https://api.betportal.com/api/payment/cashier/hook
+      - PAYMENT_PROVIDER_BALANCE_URL=https://api.betportal.com/api/player/public/balance
+
+      # Operator API (secrets from env file)
+      - OPERATOR_API_OPERATORHOST=https://test.operator-api.com
+      - OPERATOR_API_PLATFORMHOST=https://gamerun-eu.gaminguniverse.fun
+      - OPERATOR_API_PLATFORMHOST_PG=https://run.games378.com
+      - OPERATOR_API_OPERATORID=${OPERATOR_API_OPERATORID}
+      # OPERATOR_API_SECRETKEY loaded from env_file
+
+      # Game Provider (secrets from env file)
+      - GAME_LIST_HOST=https://air.gameprovider.org
+      - PROVIDER_OPERATOR_ID=${PROVIDER_OPERATOR_ID}
+      # PROVIDER_SECRET_KEY loaded from env_file
+
+      # Java
+      - JAVA_HOME=/opt/java/openjdk
+      - JAVA_VERSION=jdk-21.0.9+10
+      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+      - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - LC_ALL=en_US.UTF-8
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    # Read-only filesystem with writable tmp
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=512M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    restart: unless-stopped
+
+    # Resource limits
+    # NOTE: `deploy.resources` is enforced in Swarm. For `docker compose` on a single host,
+    # run with `docker compose --compatibility up -d` or translate to engine flags.
+    deploy:
+      resources:
+        limits:
+          cpus: '16'
+          memory: 32G
+        reservations:
+          cpus: '8'
+          memory: 16G
+
+    # File descriptor limits
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        compress: "true"
+
+    # Add host entries for bridge network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# Example /root/.env.casino file:
+#
+# # Database
+# POSTGRES_PASSWORD=your-strong-postgres-password
+# SPRING_DATASOURCE_PASSWORD=your-strong-postgres-password
+#
+# # Redis
+# REDIS_PASSWORD=your-strong-redis-password
+# SPRING_DATA_REDIS_PASSWORD=your-strong-redis-password
+#
+# # JWT
+# JWT_SECRET=your-512-bit-jwt-secret-here
+#
+# # API Keys
+# OPERATOR_API_SECRETKEY=your-operator-secret
+# PROVIDER_SECRET_KEY=your-provider-secret
+#
+# # Email
+# EMAIL_FROM=noreply@betportal.com
+# EMAIL_SUPPORT=support@betportal.com
+#
+# # Operator IDs
+# OPERATOR_API_OPERATORID=your-operator-id
+# PROVIDER_OPERATOR_ID=your-provider-id
