@@ -1,23 +1,39 @@
-# Angular Lifecycle & RxJS Patterns
+# Angular Lifecycle Hooks & Cleanup Patterns
 
-Angular doesn't have "hooks" like React, but lifecycle methods and RxJS operators serve similar purposes.
+## Overview
 
-## Lifecycle Methods
+Every component and service with subscriptions MUST implement proper cleanup. This codebase uses the `destroy$` pattern consistently across all components.
 
-### OnInit - Component Initialization
+## The Destroy Pattern
+
+### Component Implementation
 
 ```typescript
-// GOOD - Load data after component initialization
-export class GamesPageComponent implements OnInit, OnDestroy {
+@Component({
+  selector: 'app-header-new',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class HeaderNewComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
-  games$ = new BehaviorSubject<Game[]>([]);
-  
+
   ngOnInit(): void {
-    this.gameService.getGames().pipe(
-      takeUntil(this.destroy$)
-    ).subscribe(games => this.games$.next(games));
+    this.authService.currentUser$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(user => this.handleUserChange(user));
+
+    this.walletService.getWalletSummary()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(summary => this.updateBalance(summary));
+
+    this.router.events
+      .pipe(
+        filter(event => event instanceof NavigationEnd),
+        takeUntil(this.destroy$)
+      )
+      .subscribe(() => this.setCurrentPageFromRoute());
   }
-  
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -25,39 +41,27 @@ export class GamesPageComponent implements OnInit, OnDestroy {
 }
 ```
 
-### WARNING: Forgetting OnDestroy
-
-**The Problem:**
+### Service Implementation
 
 ```typescript
-// BAD - Memory leak: subscription never cleaned up
-export class BadComponent implements OnInit {
-  ngOnInit(): void {
-    this.authService.isAuthenticated$.subscribe(isAuth => {
-      this.isLoggedIn = isAuth;
+@Injectable({ providedIn: 'root' })
+export class WalletV2Service implements OnDestroy {
+  private destroy$ = new Subject<void>();
+  private balanceRefreshTimer$ = timer(0, 30000);
+
+  startBalanceRefresh(playerId: number): void {
+    this.balanceRefreshTimer$.pipe(
+      takeUntil(this.destroy$),
+      switchMap(() => this.fetchPlayerBalance(playerId)),
+      catchError(error => {
+        console.error('Balance refresh error:', error);
+        return of(null);
+      })
+    ).subscribe(balance => {
+      if (balance) this.playerBalance$.next(balance);
     });
   }
-}
-```
 
-**Why This Breaks:**
-1. Observable keeps reference to component after destruction
-2. Callback continues executing on destroyed component
-3. Memory accumulates with each navigation
-
-**The Fix:**
-
-```typescript
-// GOOD - Always implement OnDestroy with takeUntil
-export class GoodComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  
-  ngOnInit(): void {
-    this.authService.isAuthenticated$.pipe(
-      takeUntil(this.destroy$)
-    ).subscribe(isAuth => this.isLoggedIn = isAuth);
-  }
-  
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -65,76 +69,152 @@ export class GoodComponent implements OnInit, OnDestroy {
 }
 ```
 
-## RxJS Operators as "Hooks"
+---
 
-### switchMap - Cancel Previous Requests
-
-```typescript
-// Search with cancellation of stale requests
-searchGames(term$: Observable<string>): Observable<Game[]> {
-  return term$.pipe(
-    debounceTime(300),
-    distinctUntilChanged(),
-    switchMap(term => this.http.get<Game[]>(`/api/games?q=${term}`))
-  );
-}
-```
-
-### combineLatest - Multiple Dependencies
-
-```typescript
-// Combine multiple observables
-ngOnInit(): void {
-  combineLatest([
-    this.authService.currentUser$,
-    this.walletService.getBalance()
-  ]).pipe(
-    takeUntil(this.destroy$)
-  ).subscribe(([user, balance]) => {
-    this.user = user;
-    this.balance = balance;
-  });
-}
-```
-
-### WARNING: Using subscribe Inside subscribe
+## WARNING: Subscribing Without Cleanup
 
 **The Problem:**
 
 ```typescript
-// BAD - Nested subscriptions (callback hell)
-this.authService.currentUser$.subscribe(user => {
-  this.walletService.getBalance(user.id).subscribe(balance => {
-    this.balance = balance;
+// BAD - Memory leak, zombie subscription
+ngOnInit(): void {
+  this.service.someData().subscribe(data => {
+    this.data = data;
   });
-});
+}
 ```
 
 **Why This Breaks:**
-1. Inner subscription not cleaned up properly
-2. Creates new subscription on each outer emission
-3. Impossible to reason about timing
+1. Subscription persists after component destruction
+2. Memory leak accumulates with each navigation
+3. Callbacks execute on destroyed components, causing errors
+4. Multiple subscriptions pile up if user navigates back
 
 **The Fix:**
 
 ```typescript
-// GOOD - Use switchMap or mergeMap
-this.authService.currentUser$.pipe(
-  switchMap(user => this.walletService.getBalance(user.id)),
-  takeUntil(this.destroy$)
-).subscribe(balance => this.balance = balance);
+// GOOD - Properly cleaned up
+private destroy$ = new Subject<void>();
+
+ngOnInit(): void {
+  this.service.someData().pipe(
+    takeUntil(this.destroy$)
+  ).subscribe(data => {
+    this.data = data;
+  });
+}
+
+ngOnDestroy(): void {
+  this.destroy$.next();
+  this.destroy$.complete();
+}
 ```
 
-## Async Pipe Pattern
+**When You Might Be Tempted:**
+Quick prototyping, simple one-time HTTP calls (even these should use `take(1)` or async pipe).
+
+---
+
+## WARNING: Forgetting to Complete destroy$
+
+**The Problem:**
 
 ```typescript
-// Component class - expose observable
-games$ = this.gameService.getGames();
-
-// Template - async pipe handles subscription
-<div *ngFor="let game of games$ | async; trackBy: trackByGameId">
-  {{ game.name }}
-</div>
+// BAD - Subject never completed
+ngOnDestroy(): void {
+  this.destroy$.next();
+  // Missing: this.destroy$.complete();
+}
 ```
 
-The async pipe automatically subscribes and unsubscribes, eliminating manual cleanup.
+**Why This Breaks:**
+1. Subject remains in memory
+2. Any operators depending on completion won't finalize
+3. Potential for subtle memory leaks in long-running apps
+
+**The Fix:**
+
+```typescript
+// GOOD - Both next() and complete()
+ngOnDestroy(): void {
+  this.destroy$.next();
+  this.destroy$.complete();
+}
+```
+
+---
+
+## OnInit vs Constructor
+
+### Constructor: Dependency Injection Only
+
+```typescript
+// GOOD - Only DI in constructor
+constructor(
+  private playerService: PlayerService,
+  private router: Router,
+  private fb: FormBuilder
+) {}
+```
+
+### OnInit: Initialization Logic
+
+```typescript
+// GOOD - All setup in ngOnInit
+ngOnInit(): void {
+  this.initializeForm();
+  this.loadInitialData();
+  this.subscribeToRouteChanges();
+}
+```
+
+---
+
+## AfterViewInit for DOM Operations
+
+```typescript
+@Component({...})
+export class GamesListComponent implements OnInit, AfterViewInit {
+  @ViewChild('scrollContainer') scrollContainer!: ElementRef;
+
+  ngAfterViewInit(): void {
+    // DOM is now available
+    if (this.isCarousel) {
+      setTimeout(() => this.checkScrollButtons(), 200);
+    }
+  }
+}
+```
+
+---
+
+## Angular 17+ takeUntilDestroyed
+
+For newer Angular 17 code, prefer `takeUntilDestroyed()`:
+
+```typescript
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+@Component({...})
+export class ModernComponent {
+  private destroyRef = inject(DestroyRef);
+
+  ngOnInit(): void {
+    this.service.data$.pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(data => this.handleData(data));
+  }
+}
+```
+
+---
+
+## Quick Reference
+
+| Hook | Use For | Example |
+|------|---------|---------|
+| `constructor` | Dependency injection only | `private service: Service` |
+| `ngOnInit` | Subscriptions, initial data load | `this.loadData()` |
+| `ngAfterViewInit` | DOM manipulation, ViewChild access | `this.element.nativeElement` |
+| `ngOnDestroy` | Cleanup subscriptions | `this.destroy$.next()` |
+| `ngOnChanges` | React to @Input changes | `if (changes['playerId'])` |

@@ -2,111 +2,95 @@
 ---
 name: typescript
 description: |
-  TypeScript type patterns and strict mode for Angular casino platform.
-  Use when: writing Angular services/components, defining models/DTOs, handling RxJS observables, working with API responses.
+  TypeScript 5.2+ type patterns and strict mode for Angular casino platform.
+  Use when: Writing TypeScript code in casino-f/, casino-customer-f/, or casino-shared/.
+  Working with interfaces, enums, generics, or RxJS observables.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # TypeScript Skill
 
-This casino platform uses TypeScript across two Angular frontends with different strictness levels. The admin frontend (`casino-f/`) runs with `strict: false` while the customer frontend (`casino-customer-f/`) uses full strict mode. Both require proper typing for services, models, and RxJS observables.
+TypeScript 5.2+ type patterns for the casino platform's Angular frontends and shared library. The codebase uses varying strictness levels: `casino-shared/` enforces full strict mode, `casino-customer-f/` uses `strict: true`, while `casino-f/` uses selective strict checks for development flexibility.
 
 ## Quick Start
 
-### Type-Safe Service Pattern
+### String Enums
 
 ```typescript
-@Injectable({ providedIn: 'root' })
-export class PlayersService {
-  private apiUrl = `${environment.apiUrl}/players`;
-
-  constructor(private http: HttpClient) {}
-
-  // Fully typed with optional parameters
-  getPlayerTransactions(
-    playerId: number,
-    page = 0,
-    size = 20,
-    type?: TransactionType
-  ): Observable<Page<Transaction>> {
-    let params = new HttpParams()
-      .set('page', page.toString())
-      .set('size', size.toString());
-    if (type) params = params.set('type', type);
-    return this.http.get<Page<Transaction>>(`${this.apiUrl}/${playerId}/transactions`, { params });
-  }
+// Standard pattern for status/type enums
+export enum BonusStatus {
+  DRAFT = 'DRAFT',
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  EXPIRED = 'EXPIRED'
 }
 ```
 
-### String Literal Enum Pattern
+### Generic Page Interface
 
 ```typescript
-// Matches Kotlin backend exactly
-export enum PlayerStatus {
-  ACTIVE = 'ACTIVE',
-  PENDING = 'PENDING',
-  SUSPENDED = 'SUSPENDED',
-  BLOCKED = 'BLOCKED',
-  FROZEN = 'FROZEN'
+export interface Page<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
+  first: boolean;
+  last: boolean;
 }
+```
 
-// Exhaustive mapping for UI
-export const PLAYER_STATUS_LABELS: Record<PlayerStatus, string> = {
-  [PlayerStatus.ACTIVE]: 'Active',
-  [PlayerStatus.PENDING]: 'Pending',
-  [PlayerStatus.SUSPENDED]: 'Suspended',
-  [PlayerStatus.BLOCKED]: 'Blocked',
-  [PlayerStatus.FROZEN]: 'Frozen'
-};
+### Service with Typed Observables
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class PlayerService {
+  constructor(private http: HttpClient) {}
+
+  getPlayers(page = 0, size = 20): Observable<Page<Player>> {
+    const params = new HttpParams()
+      .set('page', page.toString())
+      .set('size', size.toString());
+    return this.http.get<Page<Player>>(`${environment.apiUrl}/players`, { params });
+  }
+}
 ```
 
 ## Key Concepts
 
 | Concept | Usage | Example |
 |---------|-------|---------|
-| Path aliases | Organized imports | `@core/*`, `@shared/*`, `@modules/*` |
-| String enums | Backend compatibility | `enum Status { ACTIVE = 'ACTIVE' }` |
-| Generic services | Type-safe HTTP | `http.get<Page<T>>()` |
-| Literal unions | Restricted values | `view: 'grid' \| 'list'` |
-| Partial<T> | PATCH operations | `patchPlayer(id, Partial<Player>)` |
-| Record<K, V> | Exhaustive mappings | `Record<Status, string>` |
+| String Enums | Status values, types | `enum GameType { SLOTS = 'SLOTS' }` |
+| Interfaces | Data models, DTOs | `interface Player { id: number; }` |
+| Generics | Pagination, collections | `Page<T>`, `Map<string, T>` |
+| Union Types | Mutually exclusive values | `type: 'BONUS' \| 'DEPOSIT'` |
+| Mapped Types | Display labels | `Record<GameType, string>` |
+| Path Aliases | Clean imports | `@core/*`, `@shared/*` |
 
 ## Common Patterns
 
-### Observable Cleanup
+### BehaviorSubject for State
 
-**When:** Any component subscribing to observables
+**When:** Managing component or service state that needs immediate values
 
 ```typescript
-export class ResourceComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
+private isLoadingSubject = new BehaviorSubject<boolean>(false);
+public isLoading$ = this.isLoadingSubject.asObservable();
 
-  ngOnInit() {
-    this.service.getData().pipe(
-      takeUntil(this.destroy$)
-    ).subscribe(data => this.data = data);
-  }
-
-  ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-}
+// Get current value synchronously
+const loading = this.isLoadingSubject.value;
 ```
 
-### Generic Dialog Service
+### Mapped Type for Labels
 
-**When:** Creating reusable dialog components
+**When:** Displaying enum values in UI
 
 ```typescript
-open<T, D = any, R = any>(
-  component: Type<T>,
-  config: UiDialogConfig<D> = {}
-): UiDialogRef<T, R> {
-  const dialogRef = new UiDialogRef<T, R>();
-  dialogRef.componentInstance = this.createComponent(component, config.data);
-  return dialogRef;
-}
+export const GAME_TYPE_LABELS: Record<GameType, string> = {
+  [GameType.SLOTS]: 'Slots',
+  [GameType.TABLE_GAMES]: 'Table Games',
+  [GameType.LIVE_CASINO]: 'Live Casino'
+};
 ```
 
 ## See Also
@@ -119,6 +103,5 @@ open<T, D = any, R = any>(
 ## Related Skills
 
 - See the **angular** skill for component and service patterns
-- See the **jasmine** skill for testing TypeScript code
-- See the **kotlin** skill for backend enum/DTO alignment
+- See the **jpa** skill for backend entity types that mirror frontend interfaces
 ```

@@ -1,246 +1,189 @@
-```markdown
-# Kotlin Modules Reference
+# Kotlin Modules
 
-Package structure, dependency injection, and module organization in casino-b/.
+Package organization and dependency patterns in the casino backend.
 
 ## Package Structure
 
 ```
 com.casino.core/
-├── controller/      # REST API endpoints (@RestController)
-├── service/         # Business logic (@Service, @Transactional)
-├── repository/      # Data access (@Repository, JpaRepository)
-├── domain/          # JPA entities (@Entity)
-├── dto/             # Data transfer objects (data class)
-├── config/          # Spring configuration (@Configuration)
-├── security/        # Authentication/authorization
-├── kafka/           # Event producers/consumers
-├── event/           # Domain events
-├── scheduler/       # Scheduled tasks (@Scheduled)
-└── exception/       # Custom exceptions
+├── controller/     # REST endpoints (99 files)
+├── service/        # Business logic (140 files)
+├── repository/     # JPA repositories (114 files)
+├── domain/         # JPA entities (109 files)
+├── dto/            # Data transfer objects (100 files)
+├── config/         # Spring configuration (27 files)
+├── security/       # Auth, JWT, guards
+├── kafka/          # Event publishing
+├── event/          # Domain events
+├── scheduler/      # Cron jobs
+└── exception/      # Custom exceptions
 ```
 
-## Dependency Injection
+## Layer Dependencies
 
-### Constructor Injection Pattern
-
-```kotlin
-@Service
-class PaymentService(
-    private val paymentRepository: PaymentRepository,
-    private val playerRepository: PlayerRepository,
-    private val walletService: WalletService,
-    private val eventPublisher: ApplicationEventPublisher,
-    private val notificationService: NotificationService
-) {
-    private val logger = LoggerFactory.getLogger(PaymentService::class.java)
-    
-    // Service methods...
-}
-```
-
-### Configuration Properties
-
-```kotlin
-@ConfigurationProperties(prefix = "app.payment")
-data class PaymentProperties(
-    val maxRetries: Int = 3,
-    val timeoutMs: Long = 30000,
-    val currencies: List<String> = listOf("EUR", "USD")
-)
-```
-
-## WARNING: Field Injection with @Autowired
+### WARNING: Circular Dependencies
 
 **The Problem:**
 
 ```kotlin
-// BAD - Field injection
+// BAD - ServiceA depends on ServiceB, ServiceB depends on ServiceA
+@Service
+class PlayerService(private val walletService: WalletService) { }
+
+@Service
+class WalletService(private val playerService: PlayerService) { }
+// Spring fails: circular dependency
+```
+
+**Why This Breaks:**
+1. Spring cannot instantiate beans with cycles
+2. Indicates poor separation of concerns
+3. Hard to test in isolation
+
+**The Fix:**
+
+```kotlin
+// GOOD - extract shared logic to third service
+@Service
+class PlayerService(private val playerRepository: PlayerRepository) { }
+
+@Service
+class WalletService(private val walletRepository: WalletRepository) { }
+
+@Service
+class PlayerWalletService(
+    private val playerService: PlayerService,
+    private val walletService: WalletService
+) {
+    // Coordination logic here
+}
+```
+
+## Constructor Injection
+
+### WARNING: Field Injection
+
+**The Problem:**
+
+```kotlin
+// BAD - field injection
 @Service
 class PlayerService {
     @Autowired
-    private lateinit var playerRepository: PlayerRepository
-    
-    @Autowired  
-    private lateinit var walletService: WalletService
+    private lateinit var repository: PlayerRepository
+
+    @Autowired
+    private lateinit var eventPublisher: EventPublisher
 }
 ```
 
 **Why This Breaks:**
-1. Cannot create instance without Spring context (testing nightmare)
-2. Hidden dependencies - not visible in constructor
-3. lateinit can cause UninitializedPropertyAccessException
-4. Circular dependencies hidden until runtime
+1. Cannot create instance without Spring context—untestable
+2. Dependencies are hidden—not obvious from constructor
+3. `lateinit` can throw if accessed before injection
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Constructor injection
+// GOOD - constructor injection
 @Service
 class PlayerService(
-    private val playerRepository: PlayerRepository,
-    private val walletService: WalletService
+    private val repository: PlayerRepository,
+    private val eventPublisher: EventPublisher
 ) {
-    // Dependencies are explicit and required
+    // Dependencies are explicit and immutable
 }
+
+// Tests can inject mocks easily
+val service = PlayerService(mockRepository, mockPublisher)
 ```
 
-**When You Might Be Tempted:**
-When you have many dependencies and the constructor looks long. That's a sign to split the service.
-
-## Extension Functions as Modules
-
-### Pattern: Group Extensions by Domain
+## Configuration Classes
 
 ```kotlin
-// ComplianceSettingsServiceExtensions.kt
-fun ComplianceSettingsService.getAISettings(): AIComplianceSettings {
-    return AIComplianceSettings(
-        aiEnabled = getBooleanSetting(ComplianceSettingKeys.AI_ENABLED, false),
-        aiAutoApproveThreshold = getDoubleSetting(AI_AUTO_APPROVE_THRESHOLD, 0.95)
-    )
-}
+@Configuration
+class CacheConfig {
 
-fun ComplianceSettingsService.setAIEnabled(enabled: Boolean, updatedBy: String) {
-    updateSettingByKey(ComplianceSettingKeys.AI_ENABLED, enabled.toString(), updatedBy)
-}
-
-fun ComplianceSettingsService.updateAIThresholds(
-    autoApproveThreshold: Double? = null,
-    manualReviewThreshold: Double? = null,
-    updatedBy: String
-) {
-    autoApproveThreshold?.let {
-        require(it in 0.0..1.0) { "Threshold must be between 0 and 1" }
-        updateSettingByKey(AI_AUTO_APPROVE_THRESHOLD, it.toString(), updatedBy)
-    }
-}
-```
-
-## Service Layer Patterns
-
-### Transaction Boundaries
-
-```kotlin
-@Service
-class WalletService(
-    private val walletRepository: WalletRepository,
-    private val transactionRepository: TransactionRepository
-) {
-    @Transactional
-    fun transfer(from: Long, to: Long, amount: BigDecimal): Transaction {
-        val sourceWallet = walletRepository.findByIdForUpdate(from)
-            ?: throw NotFoundException("Source wallet not found")
-        val targetWallet = walletRepository.findByIdForUpdate(to)
-            ?: throw NotFoundException("Target wallet not found")
-            
-        require(sourceWallet.balance >= amount) { "Insufficient funds" }
-        
-        sourceWallet.balance = sourceWallet.balance - amount
-        targetWallet.balance = targetWallet.balance + amount
-        
-        return transactionRepository.save(Transaction(...))
-    }
-    
-    @Transactional(readOnly = true)
-    fun getBalance(walletId: Long): BigDecimal {
-        return walletRepository.findById(walletId)?.balance ?: BigDecimal.ZERO
-    }
-}
-```
-
-## WARNING: Business Logic in Controllers
-
-**The Problem:**
-
-```kotlin
-// BAD - Logic in controller
-@RestController
-class PaymentController(
-    private val paymentRepository: PaymentRepository,
-    private val walletRepository: WalletRepository
-) {
-    @PostMapping("/payments")
-    fun createPayment(@RequestBody request: PaymentRequest): Payment {
-        val wallet = walletRepository.findByPlayerId(request.playerId)!!
-        if (wallet.balance < request.amount) {
-            throw BadRequestException("Insufficient funds")
+    @Bean
+    fun cacheManager(): CacheManager {
+        return CaffeineCacheManager().apply {
+            setCaffeine(Caffeine.newBuilder()
+                .maximumSize(10_000)
+                .expireAfterWrite(5, TimeUnit.SECONDS))
         }
-        wallet.balance = wallet.balance - request.amount
-        walletRepository.save(wallet)
-        return paymentRepository.save(Payment(...))
     }
 }
 ```
 
-**Why This Breaks:**
-1. Untestable without HTTP context
-2. Transaction boundaries unclear
-3. Logic duplicated across endpoints
-4. Violates Single Responsibility Principle
-
-**The Fix:**
+## Component Scanning
 
 ```kotlin
-// GOOD - Controller delegates to service
-@RestController
-class PaymentController(private val paymentService: PaymentService) {
-    @PostMapping("/payments")
-    @ResponseStatus(HttpStatus.CREATED)
-    fun createPayment(@Valid @RequestBody request: PaymentRequest): PaymentDto {
-        return paymentService.createPayment(request)
-    }
-}
+// GOOD - explicit component scanning
+@SpringBootApplication
+@ComponentScan(basePackages = ["com.casino.core"])
+class CasinoApplication
 
-@Service
-@Transactional
-class PaymentService(
-    private val paymentRepository: PaymentRepository,
-    private val walletService: WalletService
-) {
-    fun createPayment(request: PaymentRequest): PaymentDto {
-        walletService.debit(request.playerId, request.amount)
-        val payment = paymentRepository.save(Payment(...))
-        return PaymentDto.from(payment)
+fun main(args: Array<String>) {
+    runApplication<CasinoApplication>(*args)
+}
+```
+
+## Feature Modules
+
+### Encapsulated Feature Package
+
+```
+com.casino.core.bonus/
+├── BonusController.kt
+├── BonusService.kt
+├── BonusRepository.kt
+├── Bonus.kt (entity)
+├── BonusDto.kt
+├── BonusCategory.kt (enum)
+└── BonusNotFoundException.kt
+```
+
+## Internal Visibility
+
+```kotlin
+// GOOD - restrict visibility to module
+internal class BonusValidator {
+    internal fun validate(bonus: Bonus): ValidationResult {
+        // Only accessible within same module
     }
 }
 ```
 
-## Companion Objects
-
-### Factory Methods
+## Companion Objects for Static-Like Behavior
 
 ```kotlin
-data class PlayerDto(
-    val id: Long,
-    val username: String,
-    val status: PlayerStatus
+@Entity
+@Table(name = "transactions")
+data class Transaction(
+    @Id val id: Long? = null,
+    val amount: BigDecimal,
+    val type: TransactionType
 ) {
     companion object {
-        fun from(player: Player) = PlayerDto(
-            id = player.id!!,
-            username = player.username,
-            status = player.status
+        const val TABLE_NAME = "transactions"
+
+        fun deposit(amount: BigDecimal) = Transaction(
+            amount = amount,
+            type = TransactionType.DEPOSIT
         )
-        
-        fun fromList(players: List<Player>) = players.map { from(it) }
+
+        fun withdrawal(amount: BigDecimal) = Transaction(
+            amount = amount,
+            type = TransactionType.WITHDRAWAL
+        )
     }
 }
 ```
 
-### Constants
+## Integration with Other Skills
 
-```kotlin
-object KafkaTopics {
-    const val PLAYER_REGISTERED = "casino.player.registered.v1"
-    const val DEPOSIT_COMPLETED = "casino.payment.deposit-completed.v1"
-    const val GAME_BET_PLACED = "casino.game.bet-placed.v1"
-}
-```
+For Spring Boot configuration patterns, see the **spring-boot** skill.
 
-## Related Skills
+For JPA entity mapping, see the **jpa** skill.
 
-- See the **spring-boot** skill for @Configuration beans
-- See the **kafka** skill for event producer modules
-- See the **jpa** skill for repository patterns
-```
+For Kafka event module organization, see the **kafka** skill.

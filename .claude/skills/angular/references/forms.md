@@ -1,195 +1,296 @@
-# Reactive Forms Patterns
-
-This project uses Angular Reactive Forms with FormBuilder.
+# Angular Reactive Forms Patterns
 
 ## Basic Form Setup
 
+All forms in this codebase use Reactive Forms, never Template-driven forms.
+
+### Standard Form Pattern
+
 ```typescript
 @Component({
-  selector: 'app-login',
+  selector: 'app-currency-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
-  templateUrl: './login.component.html'
+  imports: [CommonModule, ReactiveFormsModule, UiFormFieldComponent]
 })
-export class LoginComponent implements OnInit, OnDestroy {
-  private fb = inject(FormBuilder);
-  private destroy$ = new Subject<void>();
-  
-  loginForm!: FormGroup;
+export class CurrencyFormComponent implements OnInit {
+  currencyForm!: FormGroup;
+  isEditMode = false;
   loading = false;
-  error: string | null = null;
+
+  constructor(
+    private fb: FormBuilder,
+    private currencyService: CurrencyService,
+    private dialogRef: MatDialogRef<CurrencyFormComponent>,
+    @Inject(MAT_DIALOG_DATA) public data: Currency | null
+  ) {}
 
   ngOnInit(): void {
-    this.loginForm = this.fb.group({
-      username: ['', [Validators.required]],
-      password: ['', [Validators.required, Validators.minLength(8)]],
-      rememberMe: [false]
+    this.isEditMode = !!this.data?.id;
+    this.initializeForm();
+  }
+
+  private initializeForm(): void {
+    this.currencyForm = this.fb.group({
+      code: [
+        { value: this.data?.code || '', disabled: this.isEditMode },
+        [Validators.required, Validators.minLength(2), Validators.maxLength(10)]
+      ],
+      name: [this.data?.name || '', [Validators.required, Validators.maxLength(100)]],
+      minDeposit: [this.data?.minDeposit || null, [Validators.min(0)]],
+      maxDeposit: [this.data?.maxDeposit || null, [Validators.min(0)]],
+      isActive: [this.data?.isActive ?? true]
     });
-    
-    // Clear error when user types
-    this.loginForm.valueChanges.pipe(
-      takeUntil(this.destroy$)
-    ).subscribe(() => this.error = null);
+
+    this.currencyForm.setValidators(this.limitsValidator);
+  }
+
+  limitsValidator(group: FormGroup): ValidationErrors | null {
+    const min = group.get('minDeposit')?.value;
+    const max = group.get('maxDeposit')?.value;
+    if (min && max && min > max) {
+      return { depositLimits: 'Minimum cannot exceed maximum' };
+    }
+    return null;
   }
 
   onSubmit(): void {
-    if (this.loginForm.invalid) {
-      this.markFormTouched();
+    if (this.currencyForm.invalid) {
+      this.markAllAsTouched();
       return;
     }
-    
+
     this.loading = true;
-    this.authService.login(this.loginForm.value).pipe(
-      finalize(() => this.loading = false)
-    ).subscribe({
-      next: () => this.router.navigate(['/dashboard']),
-      error: err => this.error = err.message
+    const formValue = this.currencyForm.getRawValue();  // Includes disabled fields
+
+    const save$ = this.isEditMode
+      ? this.currencyService.update(this.data!.id!, formValue)
+      : this.currencyService.create(formValue);
+
+    save$.subscribe({
+      next: (result) => {
+        this.dialogRef.close(result);
+      },
+      error: (error) => {
+        console.error('Save failed:', error);
+        this.loading = false;
+      }
     });
   }
 
-  private markFormTouched(): void {
-    Object.keys(this.loginForm.controls).forEach(key => {
-      this.loginForm.get(key)?.markAsTouched();
+  private markAllAsTouched(): void {
+    Object.keys(this.currencyForm.controls).forEach(key => {
+      const control = this.currencyForm.get(key);
+      if (control?.invalid) {
+        control.markAsTouched();
+      }
     });
-  }
-  
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 }
 ```
 
-## Template Integration
+---
 
-```html
-<form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
-  <div class="form-field">
-    <input formControlName="username" placeholder="Username" />
-    <span *ngIf="loginForm.get('username')?.touched && loginForm.get('username')?.errors?.['required']">
-      Username is required
-    </span>
-  </div>
-  
-  <div class="form-field">
-    <input type="password" formControlName="password" placeholder="Password" />
-    <span *ngIf="loginForm.get('password')?.touched && loginForm.get('password')?.errors?.['minlength']">
-      Password must be at least 8 characters
-    </span>
-  </div>
-  
-  <label>
-    <input type="checkbox" formControlName="rememberMe" />
-    Remember me
-  </label>
-  
-  <button type="submit" [disabled]="loading">
-    {{ loading ? 'Signing in...' : 'Sign In' }}
-  </button>
-  
-  <div *ngIf="error" class="error">{{ error }}</div>
-</form>
-```
-
-## WARNING: Using ngModel with Reactive Forms
+## WARNING: Using Template-Driven Forms
 
 **The Problem:**
 
 ```html
-<!-- BAD - Mixing template-driven and reactive forms -->
-<form [formGroup]="myForm">
-  <input formControlName="email" [(ngModel)]="email" />
+<!-- BAD - Template-driven form -->
+<form #myForm="ngForm" (ngSubmit)="onSubmit(myForm.value)">
+  <input [(ngModel)]="user.name" name="name" required>
 </form>
 ```
 
 **Why This Breaks:**
-1. Two sources of truth for same value
-2. Deprecated in Angular (will be removed)
-3. Unpredictable behavior and timing issues
+1. Logic scattered between template and component
+2. Harder to unit test (requires DOM)
+3. Complex validation is awkward
+4. Dynamic forms are difficult
+5. Inconsistent with codebase patterns
+
+**The Fix:**
+
+```typescript
+// GOOD - Reactive form
+this.form = this.fb.group({
+  name: ['', Validators.required]
+});
+```
+
+```html
+<form [formGroup]="form" (ngSubmit)="onSubmit()">
+  <input formControlName="name">
+</form>
+```
+
+---
+
+## WARNING: Not Showing Validation Errors
+
+**The Problem:**
+
+```html
+<!-- BAD - No feedback to user -->
+<input formControlName="email">
+<button type="submit">Save</button>
+```
+
+**Why This Breaks:**
+1. Users don't know what's wrong
+2. Form appears broken
+3. Bad UX, support tickets
 
 **The Fix:**
 
 ```html
-<!-- GOOD - Reactive forms only -->
-<form [formGroup]="myForm">
-  <input formControlName="email" />
-</form>
+<!-- GOOD - Clear error messages -->
+<input formControlName="email" [class.error]="form.get('email')?.invalid && form.get('email')?.touched">
+<div *ngIf="form.get('email')?.invalid && form.get('email')?.touched" class="error-message">
+  <span *ngIf="form.get('email')?.errors?.['required']">Email is required</span>
+  <span *ngIf="form.get('email')?.errors?.['email']">Invalid email format</span>
+</div>
 ```
 
-## Dynamic Form Fields
+---
+
+## Cross-Field Validation
 
 ```typescript
-// From ProfileComponent - dynamic field configuration
-interface FieldConfig {
-  name: string;
-  type: 'TEXT' | 'SELECT' | 'DATE' | 'PHONE' | 'MULTISELECT';
-  label: string;
-  required: boolean;
-  options?: { value: string; label: string }[];
+private initializeForm(): void {
+  this.form = this.fb.group({
+    password: ['', [Validators.required, Validators.minLength(8)]],
+    confirmPassword: ['', Validators.required]
+  });
+
+  // Form-level validator
+  this.form.setValidators(this.passwordMatchValidator);
 }
 
-export class ProfileComponent {
-  dynamicForm!: FormGroup;
-  fieldConfigs: FieldConfig[] = [];
+passwordMatchValidator(form: FormGroup): ValidationErrors | null {
+  const password = form.get('password')?.value;
+  const confirm = form.get('confirmPassword')?.value;
+  
+  if (password && confirm && password !== confirm) {
+    return { passwordMismatch: true };
+  }
+  return null;
+}
+```
 
-  buildDynamicForm(configs: FieldConfig[]): void {
-    const formGroup: { [key: string]: FormControl } = {};
-    
-    configs.forEach(config => {
-      const validators = config.required ? [Validators.required] : [];
-      formGroup[config.name] = new FormControl('', validators);
-    });
-    
-    this.dynamicForm = this.fb.group(formGroup);
+```html
+<div *ngIf="form.errors?.['passwordMismatch']" class="error-message">
+  Passwords do not match
+</div>
+```
+
+---
+
+## Dynamic Form Controls
+
+```typescript
+// BonusFormStateService pattern - rewards array
+private initializeRewardsArray(): void {
+  this.rewardsForm = this.fb.group({
+    rewards: this.fb.array([])
+  });
+}
+
+get rewardsArray(): FormArray {
+  return this.rewardsForm.get('rewards') as FormArray;
+}
+
+addReward(type: RewardType): void {
+  const rewardGroup = this.fb.group({
+    type: [type, Validators.required],
+    amount: [null, [Validators.required, Validators.min(0)]],
+    currency: ['EUR', Validators.required]
+  });
+
+  this.rewardsArray.push(rewardGroup);
+}
+
+removeReward(index: number): void {
+  this.rewardsArray.removeAt(index);
+}
+```
+
+```html
+<div *ngFor="let reward of rewardsArray.controls; let i = index" [formGroupName]="i">
+  <input formControlName="amount" type="number">
+  <select formControlName="currency">...</select>
+  <button (click)="removeReward(i)">Remove</button>
+</div>
+```
+
+---
+
+## Form State Service (Wizard Pattern)
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class BonusFormStateService {
+  private formState = new BehaviorSubject<BonusFormState>(this.getInitialState());
+
+  getFormState(): Observable<BonusFormState> {
+    return this.formState.asObservable();
+  }
+
+  updateStep(step: string, data: Partial<BonusFormState>): void {
+    const current = this.formState.value;
+    this.formState.next({ ...current, ...data, lastUpdatedStep: step });
+  }
+
+  setCategory(category: BonusCategory): void {
+    this.updateStep('general', { category });
+  }
+
+  reset(): void {
+    this.formState.next(this.getInitialState());
+  }
+
+  private getInitialState(): BonusFormState {
+    return {
+      category: null,
+      name: '',
+      rewards: [],
+      lastUpdatedStep: null
+    };
   }
 }
 ```
 
-## WARNING: Not Unsubscribing from valueChanges
+---
 
-**The Problem:**
+## Async Validation
 
 ```typescript
-// BAD - Memory leak from form subscription
-ngOnInit(): void {
-  this.form.valueChanges.subscribe(value => {
-    this.autoSave(value);
-  });
+// Check if username is already taken
+usernameValidator(control: AbstractControl): Observable<ValidationErrors | null> {
+  if (!control.value) return of(null);
+
+  return this.userService.checkUsername(control.value).pipe(
+    debounceTime(300),
+    map(exists => exists ? { usernameTaken: true } : null),
+    catchError(() => of(null))
+  );
 }
-```
 
-**The Fix:**
-
-```typescript
-// GOOD - Proper cleanup
-ngOnInit(): void {
-  this.form.valueChanges.pipe(
-    debounceTime(500),
-    takeUntil(this.destroy$)
-  ).subscribe(value => this.autoSave(value));
-}
-```
-
-## Form Arrays Pattern
-
-```typescript
-// Deposit limits form with multiple entries
-limitsForm = this.fb.group({
-  limits: this.fb.array([])
+// Usage
+this.form = this.fb.group({
+  username: ['', [Validators.required], [this.usernameValidator.bind(this)]]
 });
-
-get limitsArray(): FormArray {
-  return this.limitsForm.get('limits') as FormArray;
-}
-
-addLimit(): void {
-  this.limitsArray.push(this.fb.group({
-    period: ['DAILY', Validators.required],
-    amount: ['', [Validators.required, Validators.min(0)]]
-  }));
-}
-
-removeLimit(index: number): void {
-  this.limitsArray.removeAt(index);
-}
 ```
+
+---
+
+## Quick Reference
+
+| Task | Method |
+|------|--------|
+| Get form value | `form.value` or `form.getRawValue()` |
+| Check validity | `form.valid` / `form.invalid` |
+| Mark as touched | `control.markAsTouched()` |
+| Reset form | `form.reset()` or `form.reset(initialValues)` |
+| Disable field | `control.disable()` |
+| Get nested control | `form.get('address.city')` |
+| Patch partial values | `form.patchValue({ name: 'New' })` |

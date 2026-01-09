@@ -1,7 +1,7 @@
 ---
 name: postgresql
 description: |
-  PostgreSQL database design, Flyway migrations, and JPA queries for the casino platform.
+  PostgreSQL 14+ database design, Flyway migrations, and JPA queries for the casino platform.
   Use when: Creating or modifying database tables, writing migrations, designing entities,
   writing repository queries, or troubleshooting data layer issues.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
@@ -9,86 +9,101 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 
 # PostgreSQL Skill
 
-PostgreSQL 14+ is the primary datastore for the casino platform. This project uses Flyway for migrations, Spring Data JPA for ORM, and follows strict conventions: BIGSERIAL for all IDs, TIMESTAMP WITH TIME ZONE for dates, DECIMAL(19,4) for money. The **jpa** skill covers entity mapping in detail.
+PostgreSQL 14+ is the primary database for this casino platform, accessed via Spring Data JPA with Hibernate. All financial operations use `NUMERIC(19,4)` for precision, IDs are `BIGSERIAL`, and timestamps use `TIMESTAMP WITH TIME ZONE`. Flyway manages migrations with out-of-order support enabled.
 
 ## Quick Start
 
-### Migration Creation
+### Create a Migration
 
 ```sql
--- V20250106150000__add_player_loyalty.sql
-ALTER TABLE players ADD COLUMN loyalty_tier VARCHAR(20) DEFAULT 'BRONZE';
-CREATE INDEX idx_players_loyalty_tier ON players(loyalty_tier);
+-- V20260110120000__add_player_preferences.sql
+CREATE TABLE player_preferences (
+    id BIGSERIAL PRIMARY KEY,
+    player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    notification_email BOOLEAN NOT NULL DEFAULT true,
+    notification_sms BOOLEAN NOT NULL DEFAULT false,
+    preferred_currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_player_preferences_player_id ON player_preferences(player_id);
 ```
 
-### Entity Definition
+### Map Entity to Table
 
 ```kotlin
 @Entity
-@Table(name = "players")
-data class Player(
+@Table(name = "player_preferences")
+data class PlayerPreferences(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null,
     
-    @Column(nullable = false, precision = 19, scale = 4)
-    var balance: BigDecimal = BigDecimal.ZERO,
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "player_id", nullable = false)
+    val player: Player,
+    
+    @Column(name = "preferred_currency", nullable = false, length = 3)
+    var preferredCurrency: String = "EUR",
     
     @Column(name = "created_at", nullable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
 )
 ```
 
-### Repository Query
-
-```kotlin
-@Query("""
-    SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t
-    WHERE t.wallet.player.id = :playerId AND t.type = :type
-""")
-fun sumByPlayerIdAndType(playerId: Long, type: TransactionType): BigDecimal?
-```
-
 ## Key Concepts
 
-| Concept | SQL Type | Kotlin Type |
-|---------|----------|-------------|
-| Primary Key | `BIGSERIAL` | `Long?` |
-| Money | `DECIMAL(19,4)` | `BigDecimal` |
-| Timestamp | `TIMESTAMP WITH TIME ZONE` | `LocalDateTime` |
-| JSON | `JSONB` | `Map<String, Any>` |
-| Version | `BIGINT` | `@Version Long` |
+| SQL Type | Kotlin Type | Usage |
+|----------|-------------|-------|
+| `BIGSERIAL` | `Long` | All primary keys |
+| `NUMERIC(19,4)` | `BigDecimal` | Money, balances, amounts |
+| `TIMESTAMP WITH TIME ZONE` | `LocalDateTime` | All datetime fields |
+| `UUID` | `UUID` | External references, tokens |
+| `TEXT` | `String` | Long content, descriptions |
+| `JSONB` | `String`/Custom | Structured flexible data |
 
 ## Common Patterns
 
-### Atomic Balance Update
+### Prevent N+1 with JOIN FETCH
 
-**When:** Concurrent wallet modifications
+**When:** Loading entities with relationships
 
 ```kotlin
-@Modifying
 @Query("""
-    UPDATE Wallet w SET w.balance = w.balance + :amount, w.version = w.version + 1
-    WHERE w.player.id = :playerId AND w.version = :version AND w.balance + :amount >= 0
+    SELECT DISTINCT p FROM Player p
+    LEFT JOIN FETCH p.wallet
+    LEFT JOIN FETCH p.addresses
+    WHERE p.id = :id
 """)
-fun updateBalanceWithVersion(playerId: Long, amount: BigDecimal, version: Long): Int
+fun findByIdWithDetails(@Param("id") id: Long): Optional<Player>
 ```
 
-### Partial Index
+### Aggregate with COALESCE
 
-**When:** Filtering on common status values
+**When:** Summing values that might be null
 
-```sql
-CREATE INDEX idx_wallets_active ON wallets(player_id) WHERE status = 'ACTIVE';
+```kotlin
+@Query("""
+    SELECT COALESCE(SUM(t.amount), 0)
+    FROM Transaction t
+    WHERE t.wallet.player.id = :playerId
+    AND t.type = :type
+    AND t.status = 'COMPLETED'
+""")
+fun sumByPlayerIdAndType(
+    @Param("playerId") playerId: Long,
+    @Param("type") type: TransactionType
+): BigDecimal
 ```
 
 ## See Also
 
-- [patterns](references/patterns.md)
-- [workflows](references/workflows.md)
+- [patterns](references/patterns.md) - Schema design, indexing, query patterns
+- [workflows](references/workflows.md) - Migration workflow, testing, deployment
 
 ## Related Skills
 
 - See the **jpa** skill for entity mapping and repository patterns
-- See the **kotlin** skill for BigDecimal handling and data classes
-- See the **spring-boot** skill for transaction management
+- See the **spring-boot** skill for transaction management and configuration
+- See the **kotlin** skill for data class patterns with JPA

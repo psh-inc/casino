@@ -1,14 +1,14 @@
 ---
 name: spring-boot
 description: |
-  Spring Boot 3.2.5 REST controllers, services, and configuration for the casino backend.
+  Spring Boot 3.2.5 REST controllers, services, and configuration for the casino platform.
   Use when: Building REST APIs, configuring security, setting up caching, implementing service layer logic, or managing database transactions.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
-# Spring Boot Skill
+# Spring Boot 3.2.5 Skill
 
-Enterprise Spring Boot 3.2.5 backend using Kotlin 2.3, Java 21, JWT authentication, multi-level caching (Caffeine + Redis), and Kafka event publishing. Controllers use OpenAPI annotations, services are transactional, and exceptions are mapped globally.
+This codebase uses Spring Boot 3.2.5 with Kotlin 2.3.0 and Java 21. Key patterns include OAuth2/JWT security, multi-level caching (Caffeine L1 + Redis L2), Kafka event publishing with circuit breakers, and Jakarta Bean Validation. All services use constructor injection, `@Transactional` management, and fire-and-forget event publishing.
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ class PlayerController(
 ) {
     @GetMapping("/{id}")
     @Operation(summary = "Get player by ID")
-    @PreAuthorize("hasAuthority('ADMIN') or #id == authentication.principal.username")
+    @PreAuthorize("hasAnyAuthority('ADMIN') or #id == authentication.principal.username")
     fun getPlayer(@PathVariable id: Long): ResponseEntity<PlayerDto> {
         return ResponseEntity.ok(playerService.findById(id))
     }
@@ -42,32 +42,29 @@ class PlayerController(
 @Service
 class PlayerService(
     private val repository: PlayerRepository,
-    private val eventPublisher: EventPublisher
+    private val eventService: PlayerEventService
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    @Cacheable(value = ["players"], key = "#id")
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = ["players"], key = "'player:' + #id")
     fun findById(id: Long): PlayerDto {
-        return repository.findById(id)
-            .map { PlayerDto.from(it) }
+        val player = repository.findById(id)
             .orElseThrow { ResourceNotFoundException("Player not found: $id") }
-    }
-
-    @CacheEvict(value = ["players"], allEntries = true)
-    @Transactional
-    fun create(request: CreatePlayerRequest): PlayerDto {
-        val player = repository.save(Player(username = request.username))
-        publishEvent(player) // Fire-and-forget
         return PlayerDto.from(player)
     }
 
-    private fun publishEvent(player: Player) {
+    @Transactional
+    @CacheEvict(cacheNames = ["players"], key = "'player:' + #result.id")
+    fun create(request: CreatePlayerRequest): PlayerDto {
+        val player = repository.save(Player(username = request.username))
+        // Fire-and-forget event publishing
         try {
-            eventPublisher.publish(KafkaTopics.PLAYER_REGISTERED, player.id.toString(), event)
+            eventService.publishPlayerCreated(player)
         } catch (e: Exception) {
-            logger.error("Failed to publish event", e) // Log, don't throw
+            logger.error("Failed to publish event", e)
         }
+        return PlayerDto.from(player)
     }
 }
 ```
@@ -76,50 +73,77 @@ class PlayerService(
 
 | Concept | Usage | Example |
 |---------|-------|---------|
-| `@Transactional` | Wrap DB operations | `@Transactional(readOnly = true)` for queries |
-| `@Cacheable` | Cache method results | `@Cacheable(value = ["players"], key = "#id")` |
-| `@Valid` | Trigger validation | `fun create(@Valid @RequestBody req: Dto)` |
-| `@PreAuthorize` | Method security | `@PreAuthorize("hasAuthority('ADMIN')")` |
-| `ResponseEntity` | Control HTTP response | `ResponseEntity.status(HttpStatus.CREATED).body(dto)` |
+| Constructor DI | All dependencies via constructor | `class Service(private val repo: Repository)` |
+| Read Transactions | Use for queries | `@Transactional(readOnly = true)` |
+| Cache Keys | String interpolation | `key = "'player:' + #id"` |
+| Fire-and-Forget | Event publishing | Try-catch without rethrowing |
+| Validation | Jakarta annotations | `@Valid @RequestBody` |
 
 ## Common Patterns
 
 ### Exception Handling
 
+**When:** Returning structured error responses
+
 ```kotlin
 @RestControllerAdvice
 class GlobalExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException::class)
-    fun handleNotFound(ex: ResourceNotFoundException): ResponseEntity<ErrorResponse> {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(ErrorResponse(message = ex.message))
+    fun handleNotFound(ex: ResourceNotFoundException, request: WebRequest): ResponseEntity<ErrorResponse> {
+        return ResponseEntity(
+            ErrorResponse(
+                status = 404,
+                error = "Not Found",
+                message = ex.message ?: "Resource not found",
+                path = request.getDescription(false).substringAfter("uri=")
+            ),
+            HttpStatus.NOT_FOUND
+        )
     }
 }
 ```
 
-### Repository with Custom Queries
+### Multi-Level Caching
+
+**When:** High-frequency reads with distributed cache needs
 
 ```kotlin
-@Repository
-interface PlayerRepository : JpaRepository<Player, Long> {
-    @Query("SELECT p FROM Player p LEFT JOIN FETCH p.wallet WHERE p.id = :id")
-    fun findByIdWithWallet(@Param("id") id: Long): Optional<Player>
+@Bean
+fun walletCache(): Cache<Long, WalletBalance> {
+    return Caffeine.newBuilder()
+        .maximumSize(10_000)
+        .expireAfterWrite(Duration.ofSeconds(5))
+        .recordStats()
+        .build()
+}
+```
 
-    @Modifying
-    @Query("UPDATE Player p SET p.status = :status WHERE p.id = :id")
-    fun updateStatus(@Param("id") id: Long, @Param("status") status: PlayerStatus)
+### Async Configuration
+
+**When:** Background processing without blocking HTTP threads
+
+```kotlin
+@Bean("walletAsyncExecutor")
+fun walletAsyncExecutor(): Executor {
+    val executor = ThreadPoolTaskExecutor()
+    executor.corePoolSize = 32
+    executor.maxPoolSize = 128
+    executor.setThreadNamePrefix("wallet-async-")
+    executor.setRejectedExecutionHandler(ThreadPoolExecutor.CallerRunsPolicy())
+    executor.initialize()
+    return executor
 }
 ```
 
 ## See Also
 
-- [patterns](references/patterns.md) - Controller/Service/Repository patterns
+- [patterns](references/patterns.md) - Controller, service, and configuration patterns
 - [workflows](references/workflows.md) - Development workflows and testing
 
 ## Related Skills
 
-- **kotlin** skill for Kotlin-specific patterns and idioms
-- **jpa** skill for entity mapping and query optimization
-- **kafka** skill for event publishing configuration
-- **redis** skill for distributed caching setup
-- **postgresql** skill for database migrations and schema design
+- See the **kotlin** skill for Kotlin-specific patterns
+- See the **jpa** skill for entity and repository patterns
+- See the **postgresql** skill for database migrations
+- See the **kafka** skill for event publishing patterns
+- See the **redis** skill for distributed caching

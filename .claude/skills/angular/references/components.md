@@ -1,32 +1,89 @@
 # Angular Component Patterns
 
-## Standalone Component Structure
+## Standalone Components
 
-All components in this project use `standalone: true` (Angular 17 pattern).
+All new components in this codebase MUST be standalone. The customer frontend uses standalone exclusively.
+
+### Basic Structure
 
 ```typescript
 @Component({
-  selector: 'app-home',
+  selector: 'app-game-card',
   standalone: true,
   imports: [
     CommonModule,
     RouterModule,
-    LoadingSpinnerComponent,
-    GameSectionComponent
+    TranslateModule
   ],
-  templateUrl: './home.component.html',
-  styleUrl: './home.component.scss',
+  templateUrl: './game-card.component.html',
+  styleUrl: './game-card.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class HomeComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  
-  constructor(private gameService: GameService) {}
-  
-  ngOnInit(): void {
-    this.loadGames();
+export class GameCardComponent {
+  @Input({ required: true }) game!: GameDto;
+  @Output() favorite = new EventEmitter<string>();
+
+  onFavoriteClick(event: Event): void {
+    event.stopPropagation();
+    this.favorite.emit(this.game.id);
   }
-  
+}
+```
+
+### Complex Component with State
+
+```typescript
+@Component({
+  selector: 'app-games-list-widget',
+  standalone: true,
+  imports: [CommonModule, GameCardComponent, InfiniteScrollModule],
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class GamesListComponent implements OnInit, OnDestroy {
+  @Input() widget!: ResolvedWidget;
+
+  displayedGames: GameDto[] = [];
+  currentOffset = 0;
+  pageSize = 20;
+  hasMoreGames = false;
+  isLoadingMore = false;
+
+  private destroy$ = new Subject<void>();
+
+  constructor(
+    private gameService: GameService,
+    private favoritesService: FavoritesService
+  ) {}
+
+  ngOnInit(): void {
+    if (this.widget?.content?.games) {
+      this.displayedGames = this.widget.content.games;
+      this.currentOffset = this.displayedGames.length;
+      this.hasMoreGames = this.currentOffset < (this.widget.content.totalCount || 0);
+    }
+  }
+
+  loadMoreGames(): void {
+    if (this.isLoadingMore || !this.hasMoreGames) return;
+
+    this.isLoadingMore = true;
+    this.gameService.getGames({}, {}, this.pageSize, this.currentOffset).pipe(
+      takeUntil(this.destroy$),
+      finalize(() => this.isLoadingMore = false)
+    ).subscribe({
+      next: (response) => {
+        this.displayedGames = [...this.displayedGames, ...response.games];
+        this.currentOffset += response.games.length;
+        this.hasMoreGames = this.currentOffset < response.total;
+      },
+      error: (error) => console.error('Failed to load games:', error)
+    });
+  }
+
+  trackByGameId(index: number, game: GameDto): string {
+    return game.id;
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -34,61 +91,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 }
 ```
 
-## Smart vs Presentational Components
-
-### Smart Component (Container)
-
-```typescript
-// Handles data fetching, state, business logic
-@Component({
-  selector: 'app-games-page',
-  standalone: true,
-  imports: [CommonModule, GameCardComponent],
-  template: `
-    <app-game-card 
-      *ngFor="let game of games$ | async; trackBy: trackByGameId"
-      [game]="game"
-      (playClick)="onPlayGame(game)">
-    </app-game-card>
-  `
-})
-export class GamesPageComponent {
-  games$ = this.gameService.getPopularGames();
-  
-  trackByGameId(index: number, game: Game): string {
-    return game.id;
-  }
-  
-  onPlayGame(game: Game): void {
-    this.router.navigate(['/games', game.id]);
-  }
-}
-```
-
-### Presentational Component (Dumb)
-
-```typescript
-// Pure display, no injected services, OnPush for performance
-@Component({
-  selector: 'app-game-card',
-  standalone: true,
-  imports: [CommonModule],
-  templateUrl: './game-card.component.html',
-  changeDetection: ChangeDetectionStrategy.OnPush
-})
-export class GameCardComponent {
-  @Input() game!: Game;
-  @Input() isSelected = false;
-  
-  @Output() playClick = new EventEmitter<void>();
-  @Output() favoriteClick = new EventEmitter<void>();
-  
-  onPlayClick(event: Event): void {
-    event.stopPropagation();
-    this.playClick.emit();
-  }
-}
-```
+---
 
 ## WARNING: Logic in Templates
 
@@ -96,83 +99,154 @@ export class GameCardComponent {
 
 ```html
 <!-- BAD - Complex logic in template -->
-<div *ngIf="user && user.status === 'ACTIVE' && user.balance > 0 && !user.restricted">
-  <span>{{ user.balance * exchangeRate | currency }}</span>
+<div *ngIf="user && user.kycStatus === 'VERIFIED' && user.balance > minWithdrawal && !user.withdrawalsRestricted">
+  <button (click)="withdraw()">Withdraw</button>
 </div>
 ```
 
 **Why This Breaks:**
-1. Runs on every change detection cycle
-2. Cannot unit test template logic
-3. Hard to debug and maintain
+1. Impossible to unit test template conditions
+2. Re-evaluated on every change detection cycle
+3. Duplicated if same logic needed elsewhere
+4. Hard to read and maintain
 
 **The Fix:**
 
 ```typescript
-// GOOD - Move to component class
-get canPlay(): boolean {
-  return this.user?.status === 'ACTIVE' 
-    && this.user.balance > 0 
-    && !this.user.restricted;
-}
-
-get displayBalance(): number {
-  return this.user?.balance * this.exchangeRate;
+// GOOD - Logic in component class
+get canWithdraw(): boolean {
+  return this.user?.kycStatus === 'VERIFIED' 
+    && (this.user?.balance ?? 0) > this.minWithdrawal
+    && !this.user?.withdrawalsRestricted;
 }
 ```
 
 ```html
-<div *ngIf="canPlay">
-  <span>{{ displayBalance | currency }}</span>
+<!-- Clean template -->
+<div *ngIf="canWithdraw">
+  <button (click)="withdraw()">Withdraw</button>
 </div>
 ```
 
-## WARNING: Missing trackBy in ngFor
+---
+
+## WARNING: Using `any` Type
 
 **The Problem:**
 
-```html
-<!-- BAD - No trackBy means full re-render on any change -->
-<div *ngFor="let game of games">
-  <app-game-card [game]="game"></app-game-card>
-</div>
+```typescript
+// BAD - Defeats TypeScript benefits
+@Input() data: any;
+games: any[] = [];
 ```
 
 **Why This Breaks:**
-1. Angular recreates all DOM elements when array reference changes
-2. Destroys component state on every update
-3. Causes flickering and poor performance
+1. No autocomplete or type checking
+2. Runtime errors instead of compile-time errors
+3. Impossible to refactor safely
+4. Documentation is lost
 
 **The Fix:**
 
 ```typescript
-// Component class
-trackByGameId(index: number, game: Game): string {
-  return game.id;
+// GOOD - Proper interfaces
+interface GameDto {
+  id: string;
+  name: string;
+  provider: string;
+  isFavorite: boolean;
 }
+
+@Input() data!: GameDto;
+games: GameDto[] = [];
 ```
 
-```html
-<!-- Template -->
-<div *ngFor="let game of games; trackBy: trackByGameId">
-  <app-game-card [game]="game"></app-game-card>
-</div>
-```
+---
 
-## Dependency Injection
+## Input/Output Patterns
+
+### Required Inputs (Angular 17+)
 
 ```typescript
-// Modern inject() function (preferred)
-export class GameService {
-  private http = inject(HttpClient);
-  private router = inject(Router);
-}
+@Input({ required: true }) playerId!: number;
+@Input() showDetails = false;  // Optional with default
+```
 
-// Constructor injection (also valid)
-export class GameService {
-  constructor(
-    private http: HttpClient,
-    private router: Router
-  ) {}
+### Output Events
+
+```typescript
+@Output() gameSelected = new EventEmitter<GameDto>();
+@Output() filterChanged = new EventEmitter<FilterState>();
+
+onGameClick(game: GameDto): void {
+  this.gameSelected.emit(game);
 }
 ```
+
+---
+
+## Optimistic Updates Pattern
+
+Used for favorite toggling in this codebase:
+
+```typescript
+toggleFavorite(game: GameDto, event: Event): void {
+  event.stopPropagation();
+  if (this.favoriteLoadingId === game.id) return;
+
+  this.favoriteLoadingId = game.id;
+  const currentStatus = game.isFavorite;
+  game.isFavorite = !currentStatus;  // Optimistic update
+
+  this.favoritesService.toggleFavorite(game.id, currentStatus).subscribe({
+    next: (response) => {
+      if (!response.success) {
+        game.isFavorite = currentStatus;  // Revert on failure
+      }
+      this.favoriteLoadingId = null;
+    },
+    error: () => {
+      game.isFavorite = currentStatus;  // Revert on error
+      this.favoriteLoadingId = null;
+    }
+  });
+}
+```
+
+---
+
+## Dialog/Modal Pattern
+
+```typescript
+openCashier(): void {
+  this.paymentService.initiatePaymentSession().pipe(
+    takeUntil(this.destroy$)
+  ).subscribe({
+    next: (session) => {
+      const dialogRef = this.dialog.open(CashierModalComponent, {
+        data: { cashierUrl: session.cashierUrl },
+        width: '600px',
+        disableClose: true
+      });
+
+      dialogRef.afterClosed().subscribe(result => {
+        if (result?.success) {
+          this.walletService.refreshWalletSummary().subscribe();
+        }
+      });
+    }
+  });
+}
+```
+
+---
+
+## File Naming Convention
+
+| Type | Convention | Example |
+|------|------------|---------|
+| Component | kebab-case | `game-card.component.ts` |
+| Service | kebab-case | `games.service.ts` |
+| Model | kebab-case | `game.model.ts` |
+| Guard | kebab-case | `auth.guard.ts` |
+| Interceptor | kebab-case | `error.interceptor.ts` |

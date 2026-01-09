@@ -1,171 +1,171 @@
 ```markdown
 # TypeScript Patterns
 
-## Idiomatic Patterns for Angular Casino Platform
+Idiomatic TypeScript patterns used throughout the casino platform's Angular frontends.
 
-### Pattern 1: String Literal Enums Matching Backend
+## Observable-Based Service Pattern
+
+The standard pattern for services that communicate with the backend:
 
 ```typescript
-// GOOD - Matches Kotlin enum exactly
-export enum TransactionType {
-  DEPOSIT = 'DEPOSIT',
-  WITHDRAWAL = 'WITHDRAWAL',
-  GAME_BET = 'GAME_BET',
-  GAME_WIN = 'GAME_WIN',
-  BONUS_AWARD = 'BONUS_AWARD'
+@Injectable({ providedIn: 'root' })
+export class BonusService {
+  private apiUrl = `${environment.apiUrl}/v1/admin/bonuses`;
+
+  constructor(private http: HttpClient) {}
+
+  getBonuses(page = 0, size = 20, status?: BonusStatus): Observable<Page<BonusResponse>> {
+    let params = new HttpParams()
+      .set('page', page.toString())
+      .set('size', size.toString());
+
+    if (status) {
+      params = params.set('status', status);
+    }
+
+    return this.http.get<Page<any>>(this.apiUrl, { params }).pipe(
+      map(response => ({
+        ...response,
+        content: response.content.map(this.mapToFrontend)
+      }))
+    );
+  }
 }
 ```
 
-**Why:** The Spring Boot backend serializes enums as uppercase strings. Using matching string literal enums ensures type safety across the API boundary without runtime conversion.
+## State Management with BehaviorSubject
 
-### WARNING: Numeric Enums
+```typescript
+// GOOD - Typed BehaviorSubject with public Observable
+private currentUserSubject = new BehaviorSubject<User | null>(null);
+public currentUser$ = this.currentUserSubject.asObservable();
+public isAuthenticated$ = this.currentUserSubject.pipe(map(u => u !== null));
+
+// Access synchronously when needed
+public get currentUserValue(): User | null {
+  return this.currentUserSubject.value;
+}
+```
+
+### WARNING: Exposing BehaviorSubject Directly
 
 **The Problem:**
 
 ```typescript
-// BAD - Won't match backend JSON
-export enum TransactionType {
-  DEPOSIT,      // = 0
-  WITHDRAWAL,   // = 1
-  GAME_BET      // = 2
-}
+// BAD - Exposes mutable subject
+public currentUser = new BehaviorSubject<User | null>(null);
 ```
 
 **Why This Breaks:**
-1. Backend returns `"DEPOSIT"`, frontend expects `0`
-2. API comparisons silently fail
-3. Debugging becomes nightmare with mysterious mismatches
+1. Any consumer can call `.next()` and corrupt state
+2. Violates single-source-of-truth principle
+3. Makes debugging state changes nearly impossible
 
 **The Fix:**
 
 ```typescript
-// GOOD - String literal values
-export enum TransactionType {
-  DEPOSIT = 'DEPOSIT',
-  WITHDRAWAL = 'WITHDRAWAL',
-  GAME_BET = 'GAME_BET'
+// GOOD - Private subject, public observable
+private currentUserSubject = new BehaviorSubject<User | null>(null);
+public currentUser$ = this.currentUserSubject.asObservable();
+```
+
+## Dependency Injection with inject()
+
+Angular 17+ pattern using `inject()` function:
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class AuthService implements OnDestroy {
+  private readonly http = inject(HttpClient);
+  private readonly router = inject(Router);
+  private readonly fingerprintService = inject(FingerprintService);
+  private readonly localeId = inject(LOCALE_ID);
+
+  private destroy$ = new Subject<void>();
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 }
 ```
 
-**When You Might Be Tempted:** When you want "simpler" enum syntax or are coming from C#/Java numeric enum habits.
+## Static Utility Classes
 
----
-
-### Pattern 2: Exhaustive Record Mappings
+Pattern for stateless utility functions:
 
 ```typescript
-// GOOD - Compile-time exhaustiveness
-export const TRANSACTION_TYPE_LABELS: Record<TransactionType, string> = {
-  [TransactionType.DEPOSIT]: 'Deposit',
-  [TransactionType.WITHDRAWAL]: 'Withdrawal',
-  [TransactionType.GAME_BET]: 'Bet',
-  [TransactionType.GAME_WIN]: 'Win',
-  [TransactionType.BONUS_AWARD]: 'Bonus'
-};
+export class JwtUtils {
+  static decodeToken(token: string): JwtPayload | null {
+    try {
+      const parts = token.replace('Bearer ', '').split('.');
+      if (parts.length !== 3) return null;
+      return JSON.parse(atob(parts[1]));
+    } catch {
+      return null;
+    }
+  }
 
-// Usage in template
-{{ TRANSACTION_TYPE_LABELS[transaction.type] }}
-```
-
-**Why:** Adding a new enum value forces you to update all `Record` mappings or get a compile error.
-
----
-
-### Pattern 3: Observable Composition with Type Inference
-
-```typescript
-// GOOD - Types flow through operators
-register(request: RegistrationRequest): Observable<RegistrationResponse> {
-  return from(this.fingerprintService.generateFingerprint()).pipe(
-    mergeMap(fingerprint => {
-      const data = { ...request, fingerprint };
-      return this.http.post<RegistrationResponse>(`${this.apiUrl}/signup`, data);
-    }),
-    tap(response => {
-      this.storeTokens(response.accessToken, response.refreshToken);
-      this.currentUserSubject.next({ playerId: response.playerId });
-    }),
-    catchError(error => throwError(() => error))
-  );
+  static isTokenExpired(token: string): boolean {
+    const payload = this.decodeToken(token);
+    if (!payload?.exp) return true;
+    return Date.now() >= payload.exp * 1000;
+  }
 }
 ```
 
----
-
-### WARNING: Implicit Any in HTTP Responses
+### WARNING: Instance Methods for Stateless Operations
 
 **The Problem:**
 
 ```typescript
-// BAD - Response is `any`
-getPlayers(): Observable<any> {
-  return this.http.get(`${this.apiUrl}/players`);
+// BAD - Requires instantiation for stateless operations
+class JwtHelper {
+  decodeToken(token: string): JwtPayload | null { ... }
 }
+const helper = new JwtHelper(); // Unnecessary object
 ```
 
 **Why This Breaks:**
-1. No autocomplete on response properties
-2. Typos like `response.plalyer` won't be caught
-3. Refactoring becomes dangerous without type safety
+1. Creates unnecessary objects
+2. Implies state that doesn't exist
+3. Harder to use in static contexts
 
 **The Fix:**
 
 ```typescript
-// GOOD - Fully typed response
-getPlayers(): Observable<Page<Player>> {
-  return this.http.get<Page<Player>>(`${this.apiUrl}/players`);
+// GOOD - Static methods for stateless utilities
+export class JwtUtils {
+  static decodeToken(token: string): JwtPayload | null { ... }
+}
+// Usage: JwtUtils.decodeToken(token)
+```
+
+## Cleanup with takeUntil
+
+**When:** Managing RxJS subscriptions in components/services
+
+```typescript
+@Component({ ... })
+export class PlayerListComponent implements OnInit, OnDestroy {
+  private destroy$ = new Subject<void>();
+
+  ngOnInit() {
+    this.playerService.getPlayers().pipe(
+      takeUntil(this.destroy$)
+    ).subscribe(players => this.players = players);
+
+    interval(60000).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe(() => this.refresh());
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 }
 ```
 
----
-
-### Pattern 4: Partial<T> for PATCH Operations
-
-```typescript
-// GOOD - Only send changed fields
-patchPlayer(
-  playerId: number,
-  request: Partial<UpdatePlayerRequest>
-): Observable<PlayerDetails> {
-  return this.http.patch<PlayerDetails>(`${this.apiUrl}/${playerId}`, request);
-}
-
-// Usage
-this.playersService.patchPlayer(123, { status: PlayerStatus.ACTIVE });
-```
-
----
-
-### Pattern 5: Literal Union Types for Component Props
-
-```typescript
-@Component({...})
-export class GameGridComponent {
-  @Input() view: 'grid' | 'list' = 'grid';
-  @Input() sortBy: 'name' | 'popularity' | 'rtp' = 'popularity';
-}
-```
-
-**Why:** Provides intellisense and catches invalid values at compile time rather than runtime.
-
----
-
-### Pattern 6: Const Assertions for Readonly Data
-
-```typescript
-// GOOD - Immutable lookup table
-export const VOLATILITY_CONFIG = {
-  LOW: { color: '#4CAF50', label: 'Low Risk' },
-  MEDIUM: { color: '#FF9800', label: 'Medium Risk' },
-  HIGH: { color: '#F44336', label: 'High Risk' }
-} as const;
-
-type Volatility = keyof typeof VOLATILITY_CONFIG;
-```
-
----
-
-## Error Handling Conventions
-
-See the **angular** skill for service-level error handling patterns with RxJS operators.
+See the **angular** skill for more RxJS patterns.
 ```

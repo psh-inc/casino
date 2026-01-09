@@ -1,200 +1,214 @@
 # Kafka Workflows
 
-## Failure Handling & Recovery
-
-### How Failures Are Handled
+## Event Flow Architecture
 
 ```
-Service → ResilientAsyncEventPublisher → Circuit Breaker → Kafka
-                    ↓ (on failure)
-            FailedKafkaEvent table → Retry Job (1min) → DLQ (after 3 retries)
+Service → EventService → ResilientAsyncEventPublisher → Circuit Breaker → Kafka
+                                    ↓ (on failure)
+                         FailedKafkaEvent (DB) → FailedEventRetryService → DLQ
 ```
 
-1. **Circuit Breaker**: Opens after 50% failure rate, prevents cascading failures
-2. **Database Storage**: Failed events stored to `failed_kafka_events` table
-3. **Automatic Retry**: `FailedEventRetryService` runs every minute
-4. **Dead Letter Queue**: After max retries, events go to `{topic}.dlq`
+## Retry Mechanism Workflow
 
-### Circuit Breaker States
+### How Automatic Retry Works
 
-| State | Behavior |
-|-------|----------|
-| CLOSED | Normal operation, all publishes go to Kafka |
-| OPEN | Kafka unavailable, events stored to DB immediately |
-| HALF_OPEN | Testing recovery, limited requests allowed |
+1. **Initial Failure**: Publisher fails → Event stored in `failed_kafka_events` table
+2. **Exponential Backoff**: Retry scheduled with increasing delays
+3. **Scheduled Job**: `FailedEventRetryService` runs every 60 seconds
+4. **Success**: Event published → marked `RESOLVED`
+5. **Max Retries Exceeded**: Event sent to Dead Letter Queue
 
-### Exponential Backoff Schedule
+### Retry Schedule
+
+| Attempt | Delay | Cumulative Wait |
+|---------|-------|-----------------|
+| 1 | 1 minute | 1 minute |
+| 2 | 5 minutes | 6 minutes |
+| 3 | 15 minutes | 21 minutes |
+| 4+ | 60 minutes | ~1.5 hours |
+
+### Failed Event Statuses
 
 ```kotlin
-// Attempt 0: retry in 1 minute
-// Attempt 1: retry in 5 minutes
-// Attempt 2: retry in 15 minutes
-// Attempt 3+: retry in 60 minutes (then DLQ)
-private fun calculateNextRetry(attemptCount: Int): LocalDateTime {
-    val delayMinutes = when (attemptCount) {
-        0 -> 1L
-        1 -> 5L
-        2 -> 15L
-        else -> 60L
+// In FailedKafkaEvent entity
+status: String // PENDING → RESOLVED | DLQ | DLQ_FAILED
+```
+
+| Status | Meaning | Action Required |
+|--------|---------|-----------------|
+| `PENDING` | Awaiting retry | Automatic |
+| `RESOLVED` | Successfully retried | None |
+| `DLQ` | Sent to Dead Letter Queue | Review in DLQ topic |
+| `DLQ_FAILED` | **CRITICAL** - DLQ send failed | Manual intervention |
+
+---
+
+## Monitoring Workflow
+
+### Health Check Endpoint
+
+```
+GET /actuator/health/kafka
+```
+
+Response when healthy:
+```json
+{
+  "status": "UP",
+  "details": {
+    "circuitBreakerState": "CLOSED",
+    "pendingEvents": 0,
+    "dlqFailedEvents": 0
+  }
+}
+```
+
+Response when degraded:
+```json
+{
+  "status": "DEGRADED",
+  "details": {
+    "circuitBreakerState": "OPEN",
+    "pendingEvents": 1500,
+    "oldestPendingAge": "2 hours"
+  }
+}
+```
+
+### Key Metrics to Monitor
+
+```
+kafka.events.published{topic, status}      # Counter: success/error by topic
+kafka.publish.latency{topic}               # Timer: publish duration
+kafka.events.errors{topic, error_type}     # Counter: errors by type
+kafka.circuit_breaker.open{topic}          # Counter: circuit breaker trips
+kafka.events.stored_for_retry{topic}       # Counter: events saved to DB
+kafka.retry.attempts{topic}                # Counter: retry attempts
+kafka.retry.success{topic}                 # Counter: successful retries
+kafka.dlq.sent{topic}                      # Counter: events sent to DLQ
+```
+
+### Alert Thresholds
+
+| Metric | Warning | Critical |
+|--------|---------|----------|
+| `pending_events` | > 1000 | > 5000 |
+| `oldest_pending_age` | > 1 hour | > 4 hours |
+| `circuit_breaker_state` | HALF_OPEN | OPEN > 5 min |
+| `dlq_failed_count` | > 0 | > 0 (immediate) |
+
+---
+
+## WARNING: Not Monitoring DLQ_FAILED Events
+
+**The Problem:**
+
+```kotlin
+// Events stuck in DLQ_FAILED status = data loss risk
+val criticalEvents = failedEventRepository.countByStatus("DLQ_FAILED")
+// If this is > 0 and nobody notices...
+```
+
+**Why This Breaks:**
+1. Events that failed to reach DLQ are effectively lost
+2. No automatic recovery mechanism exists
+3. Compliance/audit issues if critical events disappear
+
+**The Fix:**
+
+```kotlin
+// Add monitoring and alerting
+@Scheduled(fixedRate = 60000)
+fun checkForCriticalFailures() {
+    val dlqFailed = failedEventRepository.countByStatus("DLQ_FAILED")
+    if (dlqFailed > 0) {
+        alertService.sendCriticalAlert(
+            "Kafka DLQ_FAILED events detected: $dlqFailed events require manual intervention"
+        )
     }
-    return LocalDateTime.now().plusMinutes(delayMinutes)
 }
 ```
 
 ---
 
-## WARNING: Silent Event Loss
+## Troubleshooting Workflow
 
-**The Problem:**
+### Problem: Events Not Publishing
 
+1. **Check circuit breaker state:**
 ```kotlin
-// BAD - If storeFailures=false, events disappear
-kafka:
-  fallback:
-    store-failures: false  # DANGEROUS
-```
-
-**Why This Breaks:**
-1. Events published during Kafka outage are lost permanently
-2. No audit trail of what happened
-3. Data inconsistency between systems (player exists but Smartico doesn't know)
-
-**The Fix:**
-
-```yaml
-# GOOD - Always store failures (default)
-kafka:
-  fallback:
-    store-failures: true
-  retry:
-    max-attempts: 3
-```
-
----
-
-## WARNING: Not Using Partition Key
-
-**The Problem:**
-
-```kotlin
-// BAD - Events for same player may arrive out of order
-eventPublisher.publish(
-    topic = KafkaTopics.PLAYER_STATUS_CHANGED,
-    key = UUID.randomUUID().toString(),  // Random key = random partition
-    event = event
-)
-```
-
-**Why This Breaks:**
-1. Events for same player go to different partitions
-2. No ordering guarantee: STATUS_CHANGED might arrive before REGISTERED
-3. Consumer sees inconsistent state
-
-**The Fix:**
-
-```kotlin
-// GOOD - Use player ID as key for ordering
-eventPublisher.publish(
-    topic = KafkaTopics.PLAYER_STATUS_CHANGED,
-    key = player.id.toString(),  // Same player = same partition = ordered
-    event = event
-)
-```
-
----
-
-## Monitoring & Health Checks
-
-### Publisher Statistics
-
-```kotlin
-// Get current publisher state
 val stats = resilientAsyncEventPublisher.getPublisherStats()
-// Returns: asyncEnabled, storeFailures, circuitBreakerState, threadPool stats
+// circuitBreakerState: OPEN means Kafka is down
 ```
 
-### Retry Service Statistics
-
+2. **Check thread pool:**
 ```kotlin
-// Get retry queue status
-val retryStats = failedEventRetryService.getRetryStats()
-// Returns: pending, resolved, dlq, dlqFailed counts
+// stats.threadPool.queueSize > 9000 = backpressure
+// stats.threadPool.activeCount = 50 = all threads busy
 ```
 
-### Key Metrics (Micrometer)
+3. **Check failed events table:**
+```sql
+SELECT status, COUNT(*) FROM failed_kafka_events GROUP BY status;
+-- PENDING count increasing = Kafka consistently down
+```
 
-| Metric | Description |
-|--------|-------------|
-| `kafka.events.published{status=success}` | Successful publishes |
-| `kafka.events.published{status=error}` | Failed publishes |
-| `kafka.publish.latency` | Publish latency distribution |
-| `kafka.circuit_breaker.open` | Circuit breaker open events |
-| `kafka.events.stored_for_retry` | Events stored for retry |
-| `kafka.retry.success` | Successful retries |
-| `kafka.dlq.sent` | Events sent to DLQ |
+### Problem: High Latency in Event Publishing
+
+1. **Check batch settings** in `KafkaProducerConfig`:
+   - `batch.size`: 32768 (32KB)
+   - `linger.ms`: 10ms
+   
+2. **Check network/Confluent Cloud status**
+
+3. **Check for slow consumers** causing backpressure
+
+### Problem: Events in DLQ
+
+1. **Read DLQ topic:**
+```bash
+kafka-console-consumer --bootstrap-server $KAFKA_BROKERS \
+  --topic casino.player.registered.v1.dlq --from-beginning
+```
+
+2. **Analyze failure reasons:**
+```sql
+SELECT last_error, COUNT(*) 
+FROM failed_kafka_events 
+WHERE status = 'DLQ'
+GROUP BY last_error;
+```
+
+3. **Reprocess if needed:** Manual intervention required
 
 ---
 
-## Consumer Pattern
+## Adding New Event Types Workflow
 
-Basic consumer implementation (see `Consumer.kt`):
-
-```kotlin
-@Service
-class MyConsumer {
-    private val logger = LoggerFactory.getLogger(javaClass)
-
-    @KafkaListener(
-        id = "myConsumer",
-        topics = ["topic_name"],
-        groupId = "springboot-group-1",
-        autoStartup = "true"
-    )
-    fun listen(
-        value: String?,
-        @Header(KafkaHeaders.RECEIVED_TOPIC) topic: String?,
-        @Header(KafkaHeaders.RECEIVED_KEY) key: String?
-    ) {
-        logger.info("Consumed from {}: key={}, value={}", topic, key, value)
-        // Process message...
-    }
-}
-```
-
----
-
-## Adding New Event Types
-
-### Step 1: Add Topic Constant
+### Step 1: Define Topic Constant
 
 ```kotlin
-// In KafkaTopics.kt
-object KafkaTopics {
-    const val MY_NEW_EVENT = "casino.domain.my-action.v1"
-}
+// KafkaTopics.kt
+const val LOYALTY_POINTS_EARNED = "casino.loyalty.points-earned.v1"
 ```
 
 ### Step 2: Create Event Classes
 
 ```kotlin
-// In kafka/events/mydomain/MyNewEvent.kt
-data class MyNewEvent(
-    override val eventId: String,
-    override val eventType: String = KafkaTopics.MY_NEW_EVENT,
-    override val eventTimestamp: String,
-    override val brandId: String,
-    override val userId: String,
-    override val metadata: EventMetadata,
-    val payload: MyNewEventPayload
-) : BaseEvent(eventId, eventType, eventTimestamp, eventVersion, brandId, userId, null, metadata)
+// LoyaltyPointsEarnedEvent.kt
+class LoyaltyPointsEarnedEvent(
+    eventId: String,
+    eventTimestamp: String,
+    brandId: String,
+    userId: String,
+    metadata: EventMetadata,
+    val payload: LoyaltyPointsEarnedPayload
+) : BaseEvent(...)
 
-data class MyNewEventPayload(
-    val field1: String,
-    val field2: BigDecimal,
-    // Smartico required fields
-    val userExtId: String,
-    val extBrandId: String,
-    val dtUpdate: String
+data class LoyaltyPointsEarnedPayload(
+    val points: Int,
+    val reason: String,
+    val source: String
 )
 ```
 
@@ -202,55 +216,38 @@ data class MyNewEventPayload(
 
 ```kotlin
 @Service
-class MyDomainEventService(
+class LoyaltyEventService(
     private val eventPublisher: EventPublisher,
     private val metadataBuilder: EventMetadataBuilder
 ) {
-    @Value("\${app.brand-id}")
-    private lateinit var brandId: String
-    
-    private val logger = LoggerFactory.getLogger(javaClass)
-
-    fun publishMyNewEvent(entity: MyEntity) {
+    fun publishPointsEarned(player: Player, points: Int, reason: String) {
         try {
-            val event = MyNewEvent(
-                eventId = EventBuilder.generateEventId(),
-                eventTimestamp = EventBuilder.getCurrentTimestamp(),
-                brandId = brandId,
-                userId = entity.playerId.toString(),
-                metadata = metadataBuilder.build(entity),
-                payload = MyNewEventPayload(/* ... */)
+            val event = LoyaltyPointsEarnedEvent(...)
+            eventPublisher.publish(
+                topic = KafkaTopics.LOYALTY_POINTS_EARNED,
+                key = player.id.toString(),
+                event = event
             )
-            
-            eventPublisher.publish(KafkaTopics.MY_NEW_EVENT, entity.playerId.toString(), event)
-            logger.info("Published MyNewEvent for entity: {}", entity.id)
         } catch (e: Exception) {
-            logger.error("Failed to publish MyNewEvent: {}", entity.id, e)
+            logger.error("Failed to publish loyalty event", e)
         }
     }
 }
 ```
 
----
-
-## Testing Kafka Events
-
-For unit tests, mock the `EventPublisher` interface. See the **spring-boot** skill for MockK patterns.
+### Step 4: Call from Business Logic
 
 ```kotlin
-@Test
-fun `should publish player registered event`() {
-    val eventPublisher = mockk<EventPublisher>(relaxed = true)
-    val service = PlayerEventService(eventPublisher, metadataBuilder)
-    
-    service.publishPlayerRegistered(testPlayer)
-    
-    verify { 
-        eventPublisher.publish(
-            topic = KafkaTopics.PLAYER_REGISTERED,
-            key = testPlayer.id.toString(),
-            event = any<PlayerRegisteredEvent>()
-        )
+@Service
+class LoyaltyService(
+    private val loyaltyEventService: LoyaltyEventService
+) {
+    fun awardPoints(player: Player, points: Int) {
+        // Business logic first
+        loyaltyRepository.addPoints(player.id, points)
+        
+        // Then publish event (never blocks or throws)
+        loyaltyEventService.publishPointsEarned(player, points, "game_win")
     }
 }
 ```

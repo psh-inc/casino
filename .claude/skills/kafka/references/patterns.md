@@ -2,212 +2,224 @@
 
 ## Event Publishing Patterns
 
-### Pattern 1: Fire-and-Forget (Recommended)
+### Pattern 1: Domain Event Service
 
-Use for most event publishing scenarios. Never blocks calling thread.
-
-```kotlin
-// GOOD - Fire and forget
-fun publishPlayerRegistered(player: Player) {
-    try {
-        val event = PlayerRegisteredEvent(
-            eventId = EventBuilder.generateEventId(),
-            eventTimestamp = EventBuilder.getCurrentTimestamp(),
-            brandId = brandId,
-            userId = player.id.toString(),
-            metadata = metadataBuilder.build(player),
-            payload = PlayerRegisteredPayload(/* ... */)
-        )
-        
-        // Returns immediately - background thread handles publish
-        eventPublisher.publish(
-            topic = KafkaTopics.PLAYER_REGISTERED,
-            key = player.id.toString(),
-            event = event
-        )
-        
-        logger.info("Published player registered event: {}", player.id)
-    } catch (e: Exception) {
-        logger.error("Failed to publish event: {}", player.id, e)
-        // NEVER throw from event publisher
-    }
-}
-```
-
-### Pattern 2: Async with Confirmation
-
-Use when you need to chain operations after successful publish.
+Each domain has a dedicated event service that encapsulates event creation and publishing.
 
 ```kotlin
-// Wait for confirmation when needed
-eventPublisher.publishAsync(topic, key, event)
-    .whenComplete { result, error ->
-        if (error == null) {
-            logger.info("Published to partition {}", result.recordMetadata.partition())
-        } else {
-            logger.error("Publish failed", error)
+@Service
+class BonusEventService(
+    private val eventPublisher: EventPublisher,
+    private val metadataBuilder: EventMetadataBuilder
+) {
+    @Value("\${app.brand-id}")
+    private lateinit var brandId: String
+
+    fun publishBonusActivated(bonus: Bonus, player: Player) {
+        try {
+            val event = BonusActivatedEvent(
+                eventId = EventBuilder.generateEventId(),
+                eventTimestamp = EventBuilder.getCurrentTimestamp(),
+                brandId = brandId,
+                userId = player.id.toString(),
+                metadata = metadataBuilder.build(player),
+                payload = BonusActivatedPayload(
+                    bonusId = bonus.id.toString(),
+                    bonusType = bonus.type.name,
+                    amount = bonus.amount.toPlainString()
+                )
+            )
+            eventPublisher.publish(
+                topic = KafkaTopics.BONUS_ACTIVATED,
+                key = player.id.toString(),
+                event = event
+            )
+            logger.info("Published bonus activated: bonusId={}", bonus.id)
+        } catch (e: Exception) {
+            logger.error("Failed to publish bonus event", e)
+            // Don't throw - event failures must not break business logic
         }
     }
+}
 ```
 
-### Pattern 3: Batch Publishing
+### Pattern 2: High-Frequency Event Batching
 
-Use for high-throughput scenarios like bulk imports.
+For events that fire rapidly (e.g., wagering updates), batch them to reduce Kafka load.
 
 ```kotlin
-val events = players.map { player ->
-    player.id.toString() to createRegistrationEvent(player)
+@Service
+class BonusEventService(...) {
+    private val wageringBatch = ConcurrentHashMap<Long, WageringContribution>()
+
+    fun addWageringContribution(playerId: Long, contribution: BigDecimal) {
+        wageringBatch.merge(playerId, WageringContribution(playerId, contribution)) { old, new ->
+            old.copy(total = old.total + new.total)
+        }
+    }
+
+    @Scheduled(fixedRate = 10000) // Every 10 seconds
+    fun flushWageringBatches() {
+        if (wageringBatch.isEmpty()) return
+        
+        val batch = HashMap(wageringBatch)
+        wageringBatch.clear()
+        
+        batch.forEach { (playerId, contribution) ->
+            publishWageringUpdateImmediate(playerId, contribution)
+        }
+    }
 }
-eventPublisher.publishBatch(KafkaTopics.PLAYER_REGISTERED, events)
 ```
 
 ---
 
-## WARNING: Throwing Exceptions from Event Publishers
+## WARNING: Throwing Exceptions in Event Publishers
 
 **The Problem:**
 
 ```kotlin
-// BAD - Exception breaks main business flow
-fun registerPlayer(request: RegisterRequest): Player {
-    val player = playerRepository.save(createPlayer(request))
-    eventPublisher.publish(topic, player.id.toString(), event) // Can throw!
-    return player  // Never reached if Kafka is down
+// BAD - Exception breaks the main business flow
+fun publishPlayerRegistered(player: Player) {
+    val event = createEvent(player)
+    eventPublisher.publish(topic, key, event) // If this fails...
+    throw RuntimeException("Failed to publish") // ...registration breaks!
 }
 ```
 
 **Why This Breaks:**
-1. Player registration fails when Kafka is unavailable
-2. User sees error even though player was saved to database
-3. Data inconsistency: player exists but no event was published
-4. Cascading failures across the system during Kafka outages
+1. Player registration fails even though database save succeeded
+2. User sees error despite account being created
+3. Inconsistent state: player exists but no Kafka event
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Wrap in try-catch, never propagate
-fun registerPlayer(request: RegisterRequest): Player {
-    val player = playerRepository.save(createPlayer(request))
+// GOOD - Log error but never throw
+fun publishPlayerRegistered(player: Player) {
     try {
-        playerEventService.publishPlayerRegistered(player)
+        val event = createEvent(player)
+        eventPublisher.publish(topic, key, event)
+        logger.info("Published player registered: {}", player.id)
     } catch (e: Exception) {
-        logger.error("Event publish failed for player {}", player.id, e)
-        // ResilientAsyncEventPublisher stores to DB automatically
+        logger.error("Failed to publish player event: {}", player.id, e)
+        // Event stored to database by ResilientAsyncEventPublisher
+        // Automatic retry will handle it
     }
-    return player
 }
 ```
 
 **When You Might Be Tempted:**
-When you want guaranteed event delivery. Instead, rely on the `FailedKafkaEvent` retry mechanism.
+When you want to ensure "all or nothing" semantics. Instead, rely on the resilient publisher's database fallback and automatic retry.
 
 ---
 
-## WARNING: Using Legacy Synchronous Publisher
+## WARNING: Using Synchronous/Blocking Publisher
 
 **The Problem:**
 
 ```kotlin
-// BAD - Blocks for 5 seconds per publish
-@Service
-class MyService(
-    @Qualifier("legacyEventPublisher")  // DON'T inject this
-    private val eventPublisher: EventPublisher
-)
+// BAD - Blocks thread for up to 5 seconds per publish
+@Qualifier("legacyEventPublisher")
+private val eventPublisher: LegacyKafkaEventPublisher
+
+fun publishEvent(event: Event) {
+    eventPublisher.publish(topic, key, event) // Blocks calling thread!
+}
 ```
 
 **Why This Breaks:**
-1. Blocks calling thread for up to 5 seconds per event
-2. No circuit breaker protection
-3. Failed events are lost permanently
-4. Can crash application if Kafka is down during high traffic
+1. HTTP request thread blocked waiting for Kafka acknowledgment
+2. Response latency increases by 100-5000ms per event
+3. Thread pool exhaustion under load
+4. No circuit breaker protection
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Default injection gives ResilientAsyncEventPublisher
+// GOOD - Use the default async publisher (automatically injected)
 @Service
-class MyService(
-    private val eventPublisher: EventPublisher  // @Primary is ResilientAsyncEventPublisher
-)
+class MyEventService(
+    private val eventPublisher: EventPublisher // Injects ResilientAsyncEventPublisher
+) {
+    fun publishEvent(event: Event) {
+        eventPublisher.publish(topic, key, event) // Returns immediately
+    }
+}
 ```
+
+**When You Might Be Tempted:**
+When you need confirmation that the event was published. Use `publishAsync()` with `.thenAccept()` instead.
 
 ---
 
-## WARNING: Hardcoded Topic Names
+## WARNING: Hardcoding Topic Names
 
 **The Problem:**
 
 ```kotlin
-// BAD - Magic strings
+// BAD - Topic name scattered across codebase
 eventPublisher.publish("casino.player.registered.v1", key, event)
 ```
 
 **Why This Breaks:**
-1. Typos cause silent failures (messages go to wrong topic)
-2. No compile-time checking
-3. Difficult to refactor or audit topic usage
+1. Topic rename requires finding all usages
+2. Typos cause silent failures (messages go nowhere)
+3. No compile-time safety
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Use constants
+// GOOD - Centralized topic constants
 eventPublisher.publish(KafkaTopics.PLAYER_REGISTERED, key, event)
+
+// In KafkaTopics.kt
+object KafkaTopics {
+    const val PLAYER_REGISTERED = "casino.player.registered.v1"
+}
 ```
 
 ---
 
-## Event Structure Best Practices
+## Event Structure Pattern
 
-### Partition Key Selection
-
-Always use `userId` (or `playerId`) as partition key for event ordering:
+All events extend `BaseEvent` with consistent structure:
 
 ```kotlin
-// GOOD - All events for a player go to same partition (ordered)
-eventPublisher.publish(
-    topic = KafkaTopics.PLAYER_STATUS_CHANGED,
-    key = player.id.toString(),  // Partition key
-    event = event
+class PlayerRegisteredEvent(
+    eventId: String,
+    eventTimestamp: String,
+    brandId: String,
+    userId: String,
+    metadata: EventMetadata,
+    val payload: PlayerRegisteredPayload
+) : BaseEvent(
+    eventId = eventId,
+    eventType = KafkaTopics.PLAYER_REGISTERED,
+    eventTimestamp = eventTimestamp,
+    brandId = brandId,
+    userId = userId,
+    metadata = metadata
+)
+
+data class PlayerRegisteredPayload(
+    val username: String,
+    val email: String,
+    val firstName: String?,
+    val lastName: String?,
+    // ... domain-specific fields
 )
 ```
-
-### Event ID Generation
-
-```kotlin
-// GOOD - UUID for deduplication
-val eventId = EventBuilder.generateEventId()  // UUID.randomUUID().toString()
-
-// GOOD - ISO-8601 timestamps
-val timestamp = EventBuilder.getCurrentTimestamp()  // Instant.now().toString()
-```
-
-### Smartico CRM Required Fields
-
-Events sent to Smartico must include these fields:
-
-```kotlin
-data class SmarticoEventPayload(
-    val userExtId: String,        // player.id
-    val extBrandId: String,       // brandId from config
-    val dtUpdate: String,         // ISO-8601 timestamp
-    val coreAccountStatus: String // Mapped via SmarticoStatusMapper
-)
-```
-
----
 
 ## Topic Naming Convention
 
-Format: `casino.{domain}.{action}.{version}`
+Follow this pattern: `casino.{domain}.{action}.v{version}`
 
 | Domain | Examples |
 |--------|----------|
 | player | `casino.player.registered.v1`, `casino.player.status-changed.v1` |
 | payment | `casino.payment.deposit-completed.v1`, `casino.payment.withdrawal-created.v1` |
-| game | `casino.game.bet-placed.v1`, `casino.game.round-completed.v1` |
 | bonus | `casino.bonus.activated.v1`, `casino.bonus.wagering-updated.v1` |
-| compliance | `casino.compliance.kyc-approved.v1`, `casino.compliance.self-excluded.v1` |
+| game | `casino.game.session-started.v1`, `casino.game.bet-placed.v1` |
 | sports | `casino.sports.bet-placed.v1`, `casino.sports.bet-settled.v1` |
-
-See `KafkaTopics.kt` for complete list.
+| compliance | `casino.compliance.kyc-submitted.v1` |

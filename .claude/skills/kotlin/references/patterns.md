@@ -1,214 +1,185 @@
-```markdown
-# Kotlin Patterns Reference
+# Kotlin Patterns
 
-Idiomatic Kotlin patterns used in the casino-b/ backend codebase.
-
-## Null Safety Patterns
-
-### Safe Call Chain with Elvis
-
-```kotlin
-// GOOD - Chained safe calls with fallback
-val balance = player?.wallet?.balance ?: BigDecimal.ZERO
-val country = player.addresses.firstOrNull { it.addressType == AddressType.RESIDENTIAL }?.country
-
-// BAD - Unsafe access that crashes on null
-val balance = player!!.wallet!!.balance  // DON'T
-```
-
-### let for Nullable Transformation
-
-```kotlin
-// GOOD - Transform only when non-null
-maxAmount?.let { max ->
-    if (calculated > max) max else calculated
-} ?: calculated
-
-// BAD - Verbose null check
-if (maxAmount != null) {
-    if (calculated > maxAmount) maxAmount else calculated
-} else {
-    calculated
-}
-```
+Idiomatic Kotlin patterns used throughout the casino-b backend.
 
 ## Scope Functions
 
-### apply for Object Configuration
+### apply - Object Configuration
 
 ```kotlin
-// GOOD - Configure object in-place
+// GOOD - configure object during construction
 val player = Player().apply {
     username = request.username
     email = request.email
     status = PlayerStatus.PENDING
 }
-
-// Use when: Building/configuring objects
 ```
 
-### also for Side Effects
+### let - Null-Safe Transformations
 
 ```kotlin
-// GOOD - Perform side effect, return original
-val saved = repository.save(entity).also {
-    logger.info("Created entity: ${it.id}")
-    eventPublisher.publish(EntityCreatedEvent(it))
+// GOOD - transform nullable value
+val displayName = player.nickname?.let { "@$it" } ?: player.username
+
+// GOOD - execute block only if non-null
+player.referralCode?.let { code ->
+    referralService.processReferral(code, player.id!!)
 }
 ```
 
-### run for Scoped Computation
+### also - Side Effects
 
 ```kotlin
-// GOOD - Compute value with receiver
-val result = player.run {
-    val fullName = "$firstName $lastName"
-    PlayerSummary(id, fullName, status)
+// GOOD - logging or side effects without changing value
+return bonusRepository.save(bonus).also {
+    logger.info("Created bonus: ${it.id}")
+    eventPublisher.publishBonusCreated(it)
 }
 ```
 
-## WARNING: Overusing Non-Null Assertion (!!)
+## Collection Operations
+
+### WARNING: Mutating Collections
 
 **The Problem:**
 
 ```kotlin
-// BAD - Crashes at runtime if null
+// BAD - mutating input list
+fun processPlayers(players: List<Player>) {
+    (players as MutableList).add(newPlayer) // ClassCastException risk
+}
+```
+
+**Why This Breaks:**
+1. Caller may pass immutable list, causing runtime exception
+2. Violates function contract—side effects are unexpected
+3. Concurrent modification if list is shared
+
+**The Fix:**
+
+```kotlin
+// GOOD - return new collection
+fun processPlayers(players: List<Player>): List<Player> {
+    return players + newPlayer
+}
+```
+
+### Filter and Map Chains
+
+```kotlin
+// GOOD - readable chain operations
+val activePlayerEmails = players
+    .filter { it.status == PlayerStatus.ACTIVE }
+    .filter { it.emailVerified }
+    .map { it.email }
+    .distinct()
+```
+
+### groupBy for Aggregation
+
+```kotlin
+// GOOD - group transactions by currency
+val transactionsByCurrency = transactions.groupBy { it.currency }
+    .mapValues { (_, txs) -> txs.sumOf { it.amount } }
+```
+
+## Null Safety Patterns
+
+### WARNING: Overusing !! (Not-Null Assertion)
+
+**The Problem:**
+
+```kotlin
+// BAD - crashes if null
 val playerId = player.id!!
-val wallet = walletRepository.findByPlayerId(id)!!
+val balance = wallet!!.balance!!
 ```
 
 **Why This Breaks:**
-1. NullPointerException at runtime defeats Kotlin's null safety
-2. No compiler protection for edge cases
-3. Fails silently in production when data is unexpectedly null
+1. NPE at runtime defeats Kotlin's null safety
+2. No information about why null occurred
+3. Cascading failures are hard to debug
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Handle null explicitly
-val playerId = player.id ?: throw IllegalStateException("Player not persisted")
-val wallet = walletRepository.findByPlayerId(id)
-    ?: throw NotFoundException("Wallet not found for player: $id")
+// GOOD - explicit handling with meaningful error
+val playerId = player.id
+    ?: throw IllegalStateException("Player must be persisted before use")
+
+// GOOD - safe call with default
+val balance = wallet?.balance ?: BigDecimal.ZERO
 ```
 
-**When You Might Be Tempted:**
-When you're "sure" the value exists (after a save, in a transaction). Always handle explicitly.
-
-## Collection Patterns
-
-### map with Data Transformation
+### Elvis Operator for Defaults
 
 ```kotlin
-val dtos = entities.map { entity ->
-    EntityDto(
-        id = entity.id!!,
-        name = entity.name,
-        createdAt = entity.createdAt
-    )
+// GOOD - provide sensible defaults
+val locale = player.locale ?: "en"
+val limit = request.limit ?: 20
+val currency = wallet?.currency ?: defaultCurrency
+```
+
+## Extension Functions
+
+### Domain-Specific Extensions
+
+```kotlin
+// GOOD - add behavior to existing types
+fun Player.isEligibleForBonus(): Boolean {
+    return status == PlayerStatus.ACTIVE &&
+           !allBonusesRestricted &&
+           kycStatus == SimpleKycStatus.VERIFIED
+}
+
+// Usage
+if (player.isEligibleForBonus()) {
+    applyBonus(player)
 }
 ```
 
-### filter with Predicate
+### String Extensions
 
 ```kotlin
-val activeGames = games.filter { game ->
-    game.status == GameStatus.ACTIVE &&
-    gameAvailabilityService.isGameAvailable(game.id, countryCode)
-}
+// GOOD - reusable string utilities
+fun String.toSlug(): String = this
+    .lowercase()
+    .replace(Regex("[^a-z0-9]+"), "-")
+    .trim('-')
 ```
 
-### groupBy for Categorization
+## Sealed Classes for State
 
 ```kotlin
-val transactionsByType = transactions.groupBy { it.type }
-val depositTotal = transactionsByType[TransactionType.DEPOSIT]
-    ?.sumOf { it.amount } ?: BigDecimal.ZERO
-```
-
-### sumOf for Aggregation
-
-```kotlin
-val totalLocked = lockedDeposits.sumOf { it.lockedAmount }
-val playerCount = segments.sumOf { it.playerIds.size }
-```
-
-## WARNING: Mutating Collections In-Place
-
-**The Problem:**
-
-```kotlin
-// BAD - Mutating shared list
-val games = gameRepository.findAll()
-games.removeIf { !it.isActive }  // Modifies underlying collection
-```
-
-**Why This Breaks:**
-1. JPA collections may be hibernate proxies - mutation causes issues
-2. Shared references see unexpected changes
-3. Thread-safety problems in concurrent contexts
-
-**The Fix:**
-
-```kotlin
-// GOOD - Create new filtered list
-val activeGames = gameRepository.findAll().filter { it.isActive }
-```
-
-## When Expression Patterns
-
-### Exhaustive When with Sealed Classes
-
-```kotlin
+// GOOD - exhaustive when expressions
 sealed class PaymentResult {
     data class Success(val transactionId: String) : PaymentResult()
-    data class Failed(val reason: String) : PaymentResult()
-    data class Pending(val checkUrl: String) : PaymentResult()
+    data class Failure(val error: String, val code: String) : PaymentResult()
+    object Pending : PaymentResult()
 }
 
-// Compiler enforces all cases handled
-fun process(result: PaymentResult): String = when (result) {
-    is PaymentResult.Success -> "Completed: ${result.transactionId}"
-    is PaymentResult.Failed -> "Failed: ${result.reason}"
-    is PaymentResult.Pending -> "Check: ${result.checkUrl}"
+fun handlePayment(result: PaymentResult): String = when (result) {
+    is PaymentResult.Success -> "Transaction: ${result.transactionId}"
+    is PaymentResult.Failure -> "Error: ${result.error}"
+    PaymentResult.Pending -> "Processing..."
+    // Compiler ensures all cases handled
 }
 ```
 
-### When with Smart Cast
+## Companion Object Factory Methods
 
 ```kotlin
-val amount = responseBody["amount"]?.let {
-    when (it) {
-        is Number -> BigDecimal(it.toString())
-        is String -> BigDecimal(it)
-        else -> BigDecimal.ONE
+data class PlayerDto(
+    val id: Long,
+    val username: String,
+    val status: PlayerStatus
+) {
+    companion object {
+        fun from(player: Player): PlayerDto = PlayerDto(
+            id = player.id!!,
+            username = player.username,
+            status = player.status
+        )
     }
-} ?: BigDecimal.ONE
-```
-
-## Validation Patterns
-
-### require for Preconditions
-
-```kotlin
-fun updateThreshold(value: Double, updatedBy: String) {
-    require(value in 0.0..1.0) { "Threshold must be between 0 and 1" }
-    require(updatedBy.isNotBlank()) { "Updater required" }
-    // proceed with update
 }
-```
-
-### check for State Invariants
-
-```kotlin
-fun withdraw(amount: BigDecimal) {
-    check(status == AccountStatus.ACTIVE) { "Account must be active" }
-    check(balance >= amount) { "Insufficient funds" }
-    // proceed with withdrawal
-}
-```
-
-## Related Skills
-
-- See the **spring-boot** skill for @Transactional patterns
-- See the **jpa** skill for repository query methods
 ```

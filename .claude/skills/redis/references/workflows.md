@@ -1,255 +1,317 @@
 # Redis Caching Workflows
 
-## Cache Warming on Startup
+## Cache Configuration Setup
 
-Pre-populate caches with frequently accessed data:
+### Multi-Level Cache Manager
 
 ```kotlin
-@Service
-class PlayerCacheService(...) {
-    fun warmActivePlayersCache() {
-        val since = LocalDateTime.now().minusHours(1)
-        val activePlayers = playerRepository.findActivePlayersSince(since)
-        
-        logger.info("Warming player cache with ${activePlayers.size} active players")
-        
-        activePlayers.forEach { player ->
-            val cachedPlayer = CachedPlayer.from(player)
-            populateCaches(player.id!!, cachedPlayer)
+// casino-b/src/main/kotlin/com/casino/core/config/MultiLevelCacheConfig.kt
+@Configuration
+class MultiLevelCacheConfig {
+    
+    @Bean
+    @Primary
+    fun compositeCacheManager(
+        @Qualifier("caffeineCacheManager") caffeineCacheManager: CacheManager,
+        @Qualifier("redisCacheManager") redisCacheManager: CacheManager
+    ): CacheManager {
+        return CompositeCacheManager().apply {
+            setCacheManagers(listOf(caffeineCacheManager, redisCacheManager))
+            setFallbackToNoOpCache(false)
         }
-        
-        meterRegistry.gauge("player.cache.warmed", activePlayers.size)
     }
 }
 ```
 
-## Bulk Cache Warming
+### Caffeine L1 Cache Configuration
 
 ```kotlin
-fun warmCache(wallets: List<WalletBalance>) {
-    if (wallets.isEmpty()) return
+// casino-b/src/main/kotlin/com/casino/core/config/CaffeineConfig.kt
+@Configuration
+@EnableCaching
+class CaffeineConfig {
     
-    // Batch set for efficiency
-    val operations = wallets.associate { wallet ->
-        val key = "$WALLET_KEY_PREFIX${wallet.playerId}"
-        key to objectMapper.writeValueAsString(wallet)
+    @Bean("caffeineCacheManager")
+    fun caffeineCacheManager(): CacheManager {
+        val caffeineCacheManager = CaffeineCacheManager()
+        caffeineCacheManager.setCaffeine(
+            Caffeine.newBuilder()
+                .maximumSize(10_000)
+                .expireAfterWrite(Duration.ofMinutes(5))
+                .recordStats()
+        )
+        return caffeineCacheManager
     }
-    redisTemplate.opsForValue().multiSet(operations)
     
-    // Set TTL for each key
-    wallets.forEach { wallet ->
-        val key = "$WALLET_KEY_PREFIX${wallet.playerId}"
-        redisTemplate.expire(key, Duration.ofSeconds(activeTtlSeconds))
+    @Bean("playerLocalCache")
+    fun playerLocalCache(): Cache<Long, CachedPlayer> {
+        return Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(Duration.ofMinutes(5))
+            .expireAfterAccess(Duration.ofMinutes(2))
+            .recordStats()
+            .build()
     }
 }
 ```
 
-## WARNING: Cache Warming Without TTL
+### Redis L2 Cache Configuration
+
+```kotlin
+// casino-b/src/main/kotlin/com/casino/core/config/RedisConfig.kt
+@Configuration
+class RedisConfig {
+    
+    @Bean("redisCacheManager")
+    fun redisCacheManager(connectionFactory: RedisConnectionFactory): RedisCacheManager {
+        val defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofHours(1))
+            .serializeKeysWith(RedisSerializationContext.SerializationPair
+                .fromSerializer(StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext.SerializationPair
+                .fromSerializer(GenericJackson2JsonRedisSerializer()))
+        
+        // Per-cache TTL overrides
+        val cacheConfigs = mapOf(
+            "walletBalance" to defaultConfig.entryTtl(Duration.ofSeconds(30)),
+            "playerProfile" to defaultConfig.entryTtl(Duration.ofMinutes(5)),
+            "games" to defaultConfig.entryTtl(Duration.ofMinutes(15)),
+            "verificationLevels" to defaultConfig.entryTtl(Duration.ofHours(2))
+        )
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(defaultConfig)
+            .withInitialCacheConfigurations(cacheConfigs)
+            .transactionAware()
+            .build()
+    }
+}
+```
+
+---
+
+## Cache Warming Workflow
+
+**When:** Application startup or after cache flush
+
+```kotlin
+// casino-b/src/main/kotlin/com/casino/core/service/cache/CacheManagementService.kt
+@Service
+class CacheManagementService(
+    private val playerRepository: PlayerRepository,
+    private val gameRepository: GameRepository,
+    private val distributedWalletCache: DistributedWalletCache
+) {
+    private val logger = LoggerFactory.getLogger(javaClass)
+    
+    @EventListener(ApplicationReadyEvent::class)
+    fun warmCacheOnStartup() {
+        logger.info("Warming cache on startup...")
+        
+        // Warm active player wallets (last 24h activity)
+        val activePlayerIds = playerRepository.findActivePlayerIds(
+            since = LocalDateTime.now().minusHours(24)
+        )
+        warmPlayerWallets(activePlayerIds)
+        
+        // Warm game catalog
+        warmGameCache()
+        
+        logger.info("Cache warming complete: ${activePlayerIds.size} wallets warmed")
+    }
+    
+    fun warmPlayerWallets(playerIds: List<Long>) {
+        playerIds.chunked(100).forEach { batch ->
+            val wallets = walletRepository.findByPlayerIds(batch)
+            distributedWalletCache.warmCache(wallets)
+        }
+    }
+}
+```
+
+---
+
+## WARNING: No Cache Warming Strategy
 
 **The Problem:**
 
 ```kotlin
-// BAD - multiSet without TTL
-redisTemplate.opsForValue().multiSet(operations)
-// Keys live forever, memory grows unbounded
+// BAD - Cold cache after deployment causes thundering herd
+@PostConstruct
+fun init() {
+    // No cache warming - first requests hit database
+}
+
+// Result: 1000 concurrent requests all hit DB simultaneously
 ```
 
 **Why This Breaks:**
-1. Redis memory grows until OOM kills it
-2. Stale data persists indefinitely
-3. No automatic cleanup of inactive player data
+1. First requests after deployment/restart hit database
+2. Thundering herd effect under load spikes
+3. Database connection pool exhaustion
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Set TTL after multiSet
-redisTemplate.opsForValue().multiSet(operations)
-wallets.forEach { wallet ->
-    redisTemplate.expire("$WALLET_KEY_PREFIX${wallet.playerId}", ttl)
+// GOOD - Pre-warm hot data on startup
+@EventListener(ApplicationReadyEvent::class)
+fun warmCacheOnStartup() {
+    val activePlayerIds = playerRepository.findActivePlayerIds(
+        since = LocalDateTime.now().minusHours(24)
+    )
+    distributedWalletCache.warmCache(walletRepository.findByPlayerIds(activePlayerIds))
 }
 ```
 
-## Cache Invalidation Strategies
+---
 
-### Single Key Invalidation
+## Cache Invalidation Patterns
+
+### Single Entity Eviction
 
 ```kotlin
-@CacheEvict(value = ["gameDetails"], key = "#gameId")
-fun updateGame(gameId: String, request: GameUpdateRequest): GameDetailsResponse
+@CacheEvict(value = ["playerDetails"], key = "'player:id:' + #id")
+fun updatePlayer(id: Long, request: UpdatePlayerRequest): PlayerDto
 ```
 
-### Bulk Invalidation
+### Multi-Cache Eviction
 
 ```kotlin
-@CacheEvict(
-    value = ["games", "gameDetails", "gameCountryConfigs", "featuredGames", "popularGames"],
-    allEntries = true
-)
-fun bulkUpdateGameTypesFromCsv(file: MultipartFile): BulkUpdateGameTypesResponse
+// casino-b/src/main/kotlin/com/casino/core/service/CurrencyService.kt
+@CacheEvict(value = ["currencies", "active-currencies", "currency-options"], allEntries = true)
+fun createCurrency(request: CreateCurrencyRequest): CurrencyDto
 ```
 
-### Pattern-Based Invalidation
+### Pattern-Based Eviction
 
 ```kotlin
-fun invalidatePlayerCache(playerId: Long) {
-    val pattern = "player:*:$playerId:*"
+// casino-b/src/main/kotlin/com/casino/core/service/cache/PlayerStatisticsCacheService.kt
+fun evictPlayerStatisticsCache(playerId: Long) {
+    // L1: Clear Caffeine
+    localCache.invalidate(playerId)
+    
+    // L2: Pattern-based Redis eviction
+    val pattern = cacheKeys.playerPattern(playerId)  // "player:*:123:*"
     val keys = redisTemplate.keys(pattern)
     if (keys.isNotEmpty()) {
         redisTemplate.delete(keys)
-        logger.debug("Deleted ${keys.size} Redis cache entries for player: $playerId")
+        logger.debug("Evicted ${keys.size} cache entries for player $playerId")
     }
 }
 ```
 
-## WARNING: Using KEYS in Production
+---
+
+## WARNING: Forgetting L1 Invalidation
 
 **The Problem:**
 
 ```kotlin
-// BAD - KEYS blocks Redis
-val keys = redisTemplate.keys("player:*")  // Scans ALL keys
-redisTemplate.delete(keys)
+// BAD - Only evicts Redis, L1 Caffeine still has stale data
+@CacheEvict(value = ["players"], key = "#playerId")
+fun updatePlayer(playerId: Long, request: UpdateRequest): Player {
+    // Spring Cache only targets redisCacheManager
+    // Caffeine localCache still has old data!
+}
 ```
 
 **Why This Breaks:**
-1. `KEYS *` is O(N) and blocks Redis during execution
-2. With millions of keys, this can freeze Redis for seconds
-3. All other operations queue behind it
+1. L1 cache serves stale data for its remaining TTL (up to 5 minutes)
+2. Users see inconsistent data depending on which server handles request
+3. Debug nightmare - "works on my machine" but fails in production
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Use SCAN for large keyspaces (in batch cleanup)
-// Or better: use specific cache names and allEntries = true
-@CacheEvict(value = ["playerCache"], allEntries = true)
-fun clearPlayerCaches() { }
-
-// For programmatic cleanup, limit scope:
-val keys = redisTemplate.keys("player:stats:$playerId:*")  // Narrow pattern
+// GOOD - Invalidate both layers explicitly
+fun updatePlayer(playerId: Long, request: UpdateRequest): Player {
+    val player = playerRepository.save(...)
+    
+    // Evict L1 (Caffeine)
+    localCache.invalidate(playerId)
+    
+    // Evict L2 (Redis) 
+    redisTemplate.delete("player:$playerId")
+    
+    return player
+}
 ```
 
-**When You Might Be Tempted:**
-When you need to clear "all player caches" but the pattern is too broad.
+---
 
 ## Cache Health Monitoring
 
 ```kotlin
+// casino-b/src/main/kotlin/com/casino/core/service/cache/CacheManagementService.kt
 fun getCacheHealthStatus(): CacheHealthStatus {
-    val caffeineAvailable = cacheManager.cacheNames.isNotEmpty()
-    val redisAvailable = try {
-        redisTemplate.connectionFactory?.connection?.ping() != null
-    } catch (e: Exception) { false }
+    val caffeineStats = caffeineCache.stats()
     
-    val cacheStats = cacheManager.cacheNames.mapNotNull { cacheName ->
-        val cache = cacheManager.getCache(cacheName) as? CaffeineCache
-        cache?.let {
-            val stats = it.nativeCache.stats()
-            CacheStatistics(
-                cacheName = cacheName,
-                size = it.nativeCache.estimatedSize(),
-                hitRate = stats.hitRate(),
-                evictionCount = stats.evictionCount()
-            )
-        }
+    val warnings = mutableListOf<String>()
+    
+    // Check hit rate
+    if (caffeineStats.hitRate() < 0.5) {
+        warnings.add("Low cache hit rate: ${caffeineStats.hitRate()}")
+    }
+    
+    // Check Redis connectivity
+    val redisHealthy = try {
+        redisTemplate.connectionFactory?.connection?.ping() == "PONG"
+    } catch (e: Exception) {
+        warnings.add("Redis connection failed: ${e.message}")
+        false
     }
     
     return CacheHealthStatus(
-        healthy = caffeineAvailable && redisAvailable,
-        cacheStatistics = cacheStats
+        caffeineHitRate = caffeineStats.hitRate(),
+        caffeineSize = caffeineStats.estimatedSize(),
+        redisHealthy = redisHealthy,
+        warnings = warnings
     )
 }
 ```
 
-## Cache Statistics Tracking
+---
 
-```kotlin
-fun getPlayer(playerId: Long): CachedPlayer? {
-    // L1: Local cache
-    localCache.getIfPresent(playerId)?.let {
-        meterRegistry.counter("player.cache.hit", "layer", "local").increment()
-        return it
-    }
-    
-    // L2: Redis cache
-    redisTemplate.opsForValue().get(redisKey)?.let {
-        meterRegistry.counter("player.cache.hit", "layer", "redis").increment()
-        localCache.put(playerId, it)
-        return it
-    }
-    
-    // L3: Database miss
-    meterRegistry.counter("player.cache.miss").increment()
-    return loadFromDatabase(playerId)
-}
+## application.yml Configuration
+
+```yaml
+# casino-b/src/main/resources/application.yml
+spring:
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000  # 1 hour default
+      cache-null-values: false
+      use-key-prefix: true
+      key-prefix: "casino:"
+  
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+
+# Custom cache config
+wallet:
+  cache:
+    local:
+      max-size: 10000
+      ttl-seconds: 5
+    distributed:
+      active-ttl-seconds: 30
+      inactive-ttl-seconds: 300
 ```
 
-## WARNING: Caching Null Values
-
-**The Problem:**
-
-```kotlin
-// BAD - Caching null allows cache penetration attacks
-@Cacheable(value = ["players"], key = "#id")
-fun findPlayer(id: Long): Player? {
-    return playerRepository.findById(id).orElse(null)
-}
-// Repeated requests for non-existent ID bypass cache
-```
-
-**Why This Breaks:**
-1. Every request for non-existent ID hits database
-2. Attackers can DoS your database with invalid IDs
-3. Redis config `disableCachingNullValues()` silently skips nulls
-
-**The Fix:**
-
-```kotlin
-// GOOD - Cache a sentinel value or use unless condition
-@Cacheable(value = ["players"], key = "#id", unless = "#result == null")
-fun findPlayer(id: Long): Player? {
-    return playerRepository.findById(id).orElse(null)
-}
-
-// Or use a wrapper that caches the absence
-data class CacheablePlayer(val player: Player?, val exists: Boolean)
-```
-
-## Scheduled Cache Cleanup
-
-```kotlin
-@Scheduled(fixedRate = 3600000)  // Every hour
-fun scheduledCacheCleanup() {
-    logger.debug("Running scheduled cache cleanup")
-    
-    // Clean up expired Redis entries
-    val expiredPattern = "*:expired:*"
-    val expiredKeys = redisTemplate.keys(expiredPattern)
-    if (expiredKeys.isNotEmpty()) {
-        redisTemplate.delete(expiredKeys)
-    }
-    
-    // Remove old entries from active players sorted set
-    val activePlayersKey = "active:players:sorted"
-    val cutoffTime = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(1)
-    redisTemplate.opsForZSet().removeRangeByScore(activePlayersKey, 0.0, cutoffTime.toDouble())
-}
-```
-
-## Redis Serialization Configuration
-
-```kotlin
-@Bean
-fun redisTemplate(redisObjectMapper: ObjectMapper): RedisTemplate<String, Any> {
-    val template = RedisTemplate<String, Any>()
-    template.connectionFactory = redisConnectionFactory()
-    template.keySerializer = StringRedisSerializer()
-    template.valueSerializer = GenericJackson2JsonRedisSerializer(redisObjectMapper)
-    template.hashKeySerializer = StringRedisSerializer()
-    template.hashValueSerializer = GenericJackson2JsonRedisSerializer(redisObjectMapper)
-    return template
-}
-```
+---
 
 ## Related Skills
 
-For Spring Boot configuration details, see the **spring-boot** skill. For Kotlin-specific patterns in services, see the **kotlin** skill. For JPA repository caching integration, see the **jpa** skill.
+- See the **spring-boot** skill for `@Cacheable` annotation configuration
+- See the **kotlin** skill for data class serialization with Jackson
+- See the **jpa** skill for repository patterns used in cache fallback

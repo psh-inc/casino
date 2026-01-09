@@ -1,114 +1,217 @@
 # JPA Workflows Reference
 
-This document covers transaction management, testing, and common development workflows.
+Common development workflows for JPA in the casino platform.
 
-## Transaction Management
+## Creating a New Entity
 
-### Service Layer Transactions
-
-Apply `@Transactional` at class level for write operations:
+### Step 1: Define Entity Class
 
 ```kotlin
-@Service
-@Transactional  // All methods are transactional by default
-class WalletService(
-    private val walletRepository: WalletRepository,
-    private val transactionRepository: TransactionRepository
-) {
-    // This inherits class-level @Transactional (read-write)
-    fun createWallet(player: Player, currency: String): Wallet {
-        return walletRepository.save(Wallet(player = player, currency = currency))
-    }
+@Entity
+@Table(name = "payment_methods")
+data class PaymentMethod(
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long? = null,
 
-    // Override for read-only optimization
-    @Transactional(readOnly = true)
-    fun getWalletByPlayerId(playerId: Long): Wallet {
-        return walletRepository.findByPlayerId(playerId)
-            .orElseThrow { ResourceNotFoundException("Wallet not found") }
+    @Column(nullable = false, length = 100)
+    val name: String,
+
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    val type: PaymentMethodType,
+
+    @Column(nullable = false)
+    var enabled: Boolean = true,
+
+    @Column(name = "created_at", nullable = false)
+    val createdAt: LocalDateTime = LocalDateTime.now(),
+
+    @Column(name = "updated_at", nullable = false)
+    var updatedAt: LocalDateTime = LocalDateTime.now()
+) {
+    override fun hashCode(): Int = id?.hashCode() ?: 0
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PaymentMethod) return false
+        return id != null && id == other.id
     }
+}
+```
+
+### Step 2: Create Flyway Migration
+
+See the **postgresql** skill for migration details. File naming: `V{timestamp}__add_payment_methods.sql`
+
+```sql
+CREATE TABLE payment_methods (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_payment_methods_type ON payment_methods(type);
+```
+
+### Step 3: Create Repository
+
+```kotlin
+@Repository
+interface PaymentMethodRepository : JpaRepository<PaymentMethod, Long> {
+    fun findByType(type: PaymentMethodType): List<PaymentMethod>
+    fun findByEnabledTrue(): List<PaymentMethod>
+    fun existsByNameIgnoreCase(name: String): Boolean
 }
 ```
 
 ---
 
-### WARNING: Transaction Propagation Issues
+## Adding a Relationship
+
+### Adding ManyToOne (Transaction → PaymentMethod)
+
+**Step 1: Update Entity**
+
+```kotlin
+@Entity
+@Table(name = "transactions")
+data class Transaction(
+    // ... existing fields ...
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_method_id")
+    val paymentMethod: PaymentMethod? = null
+)
+```
+
+**Step 2: Migration**
+
+```sql
+ALTER TABLE transactions
+ADD COLUMN payment_method_id BIGINT REFERENCES payment_methods(id);
+
+CREATE INDEX idx_transactions_payment_method ON transactions(payment_method_id);
+```
+
+---
+
+## Custom Repository Implementation
+
+For complex queries beyond JPQL:
+
+### Step 1: Define Custom Interface
+
+```kotlin
+interface GameRepositoryCustom {
+    fun findByAdvancedCriteria(
+        query: String?,
+        providerIds: List<Long>,
+        pageable: Pageable
+    ): Page<Game>
+}
+```
+
+### Step 2: Implement with Criteria API
+
+```kotlin
+@Repository
+class GameRepositoryImpl : GameRepositoryCustom {
+    @PersistenceContext
+    private lateinit var entityManager: EntityManager
+
+    override fun findByAdvancedCriteria(
+        query: String?,
+        providerIds: List<Long>,
+        pageable: Pageable
+    ): Page<Game> {
+        val cb = entityManager.criteriaBuilder
+        val cq = cb.createQuery(Game::class.java)
+        val root = cq.from(Game::class.java)
+
+        val predicates = mutableListOf<Predicate>()
+
+        query?.let {
+            predicates.add(
+                cb.like(cb.lower(root.get("name")), "%${it.lowercase()}%")
+            )
+        }
+
+        if (providerIds.isNotEmpty()) {
+            predicates.add(root.get<Long>("provider").get<Long>("id").`in`(providerIds))
+        }
+
+        cq.where(*predicates.toTypedArray())
+
+        val results = entityManager.createQuery(cq)
+            .setFirstResult(pageable.offset.toInt())
+            .setMaxResults(pageable.pageSize)
+            .resultList
+
+        // Count query
+        val countQuery = cb.createQuery(Long::class.java)
+        val countRoot = countQuery.from(Game::class.java)
+        countQuery.select(cb.count(countRoot))
+        if (predicates.isNotEmpty()) {
+            countQuery.where(*predicates.toTypedArray())
+        }
+        val total = entityManager.createQuery(countQuery).singleResult
+
+        return PageImpl(results, pageable, total)
+    }
+}
+```
+
+### Step 3: Extend Main Repository
+
+```kotlin
+@Repository
+interface GameRepository : JpaRepository<Game, Long>, GameRepositoryCustom {
+    // Simple queries here
+    fun findByStatus(status: GameStatus): List<Game>
+}
+```
+
+---
+
+## WARNING: Missing Pagination on Large Queries
 
 **The Problem:**
 
 ```kotlin
-// BAD - Internal call bypasses proxy, no transaction!
-@Service
-class PlayerService {
-    fun createPlayerWithWallet(request: CreateRequest) {
-        createPlayer(request)  // Direct call - NOT transactional!
-    }
-    
-    @Transactional
-    fun createPlayer(request: CreateRequest) { ... }
-}
+// BAD - Loads all players into memory
+@Query("SELECT p FROM Player p WHERE p.status = 'ACTIVE'")
+fun findAllActive(): List<Player>  // 100,000+ records = OOM
 ```
 
 **Why This Breaks:**
-1. Spring AOP proxies only intercept external calls
-2. Internal method calls bypass the proxy entirely
-3. No rollback on failure, data inconsistency
+1. OutOfMemoryError in production
+2. Slow response times even if it succeeds
+3. Database connection held too long
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Single transactional method or inject self
-@Service
-@Transactional
-class PlayerService {
-    fun createPlayerWithWallet(request: CreateRequest) {
-        // Everything in one transactional method
-        val player = playerRepository.save(...)
-        val wallet = walletRepository.save(...)
-    }
-}
+// GOOD - Paginated results
+fun findByStatus(status: PlayerStatus, pageable: Pageable): Page<Player>
+
+// Usage
+val page = repo.findByStatus(PlayerStatus.ACTIVE, PageRequest.of(0, 100))
 ```
 
 **When You Might Be Tempted:**
-When refactoring large methods into smaller ones - keep transaction boundaries in mind.
+Export features, reports, or "get all" APIs. Always paginate or stream.
 
 ---
 
-## Atomic Update Pattern
+## Testing Repositories
 
-For high-concurrency updates, bypass entity loading:
-
-```kotlin
-@Modifying
-@Query("""
-    UPDATE Wallet w 
-    SET w.balance = w.balance + :amount, 
-        w.version = w.version + 1,
-        w.updatedAt = CURRENT_TIMESTAMP
-    WHERE w.player.id = :playerId 
-    AND w.balance + :amount >= 0
-    AND w.status = 'ACTIVE'
-""")
-fun updateBalanceAtomic(
-    @Param("playerId") playerId: Long, 
-    @Param("amount") amount: BigDecimal
-): Int  // Returns 1 if updated, 0 if failed
-
-// Usage
-val updated = walletRepository.updateBalanceAtomic(playerId, amount)
-if (updated == 0) {
-    throw InsufficientFundsException("Balance update failed")
-}
-```
-
----
-
-## Repository Testing Workflow
-
-### Integration Test Setup with Testcontainers
+Use `@DataJpaTest` for repository tests:
 
 ```kotlin
 @DataJpaTest
-@Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 class PlayerRepositoryTest {
     @Autowired
@@ -117,179 +220,37 @@ class PlayerRepositoryTest {
     @Autowired
     private lateinit var entityManager: TestEntityManager
 
-    companion object {
-        @Container
-        @JvmStatic
-        val postgresContainer = PostgreSQLContainer("postgres:14-alpine")
-            .withDatabaseName("casino_test")
-
-        @JvmStatic
-        @DynamicPropertySource
-        fun properties(registry: DynamicPropertyRegistry) {
-            registry.add("spring.datasource.url", postgresContainer::getJdbcUrl)
-            registry.add("spring.datasource.username", postgresContainer::getUsername)
-            registry.add("spring.datasource.password", postgresContainer::getPassword)
-        }
-    }
-
-    @BeforeEach
-    fun cleanup() {
-        playerRepository.deleteAll()
-        entityManager.clear()  // Clear persistence context
-    }
-
     @Test
-    fun `findByUsername should return player when exists`() {
-        // Given
-        val player = playerRepository.save(createTestPlayer())
-        entityManager.flush()
-        entityManager.clear()  // Force re-read from DB
+    fun `findByUsername returns player when exists`() {
+        val player = Player(username = "testuser", email = "test@example.com")
+        entityManager.persistAndFlush(player)
 
-        // When
-        val result = playerRepository.findByUsername("testuser")
+        val found = playerRepository.findByUsername("testuser")
 
-        // Then
-        result.isPresent shouldBe true
-        result.get().username shouldBe "testuser"
+        assertThat(found).isPresent
+        assertThat(found.get().username).isEqualTo("testuser")
     }
 }
 ```
 
 ---
 
-### WARNING: Missing flush/clear in Tests
+## Debugging JPA Queries
 
-**The Problem:**
+Enable SQL logging in `application.yml`:
 
-```kotlin
-// BAD - Entity still in persistence context, not testing DB
-@Test
-fun `test finds player`() {
-    val player = playerRepository.save(createPlayer())
-    // Player is still cached in first-level cache!
-    val found = playerRepository.findById(player.id!!)  // Returns cached, not from DB
-}
+```yaml
+spring:
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
 ```
 
-**Why This Breaks:**
-1. Hibernate returns cached entity, not testing actual query
-2. Lazy loading issues hidden by cache
-3. Tests pass but production fails
-
-**The Fix:**
-
-```kotlin
-// GOOD - Clear cache to force DB read
-@Test
-fun `test finds player`() {
-    val player = playerRepository.save(createPlayer())
-    entityManager.flush()   // Write to DB
-    entityManager.clear()   // Clear cache
-    
-    val found = playerRepository.findById(player.id!!)  // Reads from DB
-}
-```
-
----
-
-## BigDecimal Handling
-
-### WARNING: Creating BigDecimal from Double
-
-**The Problem:**
-
-```kotlin
-// BAD - Precision loss!
-val amount = BigDecimal(123.45)  // Actually 123.4500000000000028421709...
-```
-
-**Why This Breaks:**
-1. Double cannot represent 123.45 exactly in binary
-2. Financial calculations accumulate errors
-3. Balance mismatches in reports
-
-**The Fix:**
-
-```kotlin
-// GOOD - String constructor preserves precision
-val amount = BigDecimal("123.45")
-
-// Comparisons
-if (amount.compareTo(BigDecimal.ZERO) > 0) { ... }  // NOT == or !=
-```
-
----
-
-## JPQL vs Native Query Decision
-
-| Use Case | Approach |
-|----------|----------|
-| Simple lookups | Derived query methods |
-| Entity with associations | JPQL with JOIN FETCH |
-| Complex dynamic filters | Criteria API |
-| Database-specific features | Native query |
-| Bulk updates | `@Modifying` JPQL |
-
-### JPQL Example
-
-```kotlin
-@Query("""
-    SELECT p FROM Player p
-    WHERE p.status = :status
-    AND p.createdAt BETWEEN :from AND :to
-    ORDER BY p.createdAt DESC
-""")
-fun findByStatusInDateRange(
-    @Param("status") status: PlayerStatus,
-    @Param("from") from: LocalDateTime,
-    @Param("to") to: LocalDateTime
-): List<Player>
-```
-
-### Native Query Example
-
-```kotlin
-@Query(
-    value = """
-        SELECT * FROM players 
-        WHERE EXTRACT(MONTH FROM date_of_birth) = :month 
-        AND EXTRACT(DAY FROM date_of_birth) = :day
-        AND status = 'ACTIVE'
-    """,
-    nativeQuery = true
-)
-fun findByBirthdayNative(
-    @Param("month") month: Int,
-    @Param("day") day: Int
-): List<Player>
-```
-
----
-
-## Modifying Query Pattern
-
-For bulk updates that don't need to load entities:
-
-```kotlin
-@Modifying
-@Query("UPDATE Player p SET p.status = :status WHERE p.id IN :ids")
-fun updateStatusBatch(
-    @Param("ids") ids: List<Long>,
-    @Param("status") status: PlayerStatus
-): Int
-
-// IMPORTANT: Clear cache after @Modifying queries
-@Transactional
-fun suspendPlayers(playerIds: List<Long>) {
-    playerRepository.updateStatusBatch(playerIds, PlayerStatus.SUSPENDED)
-    entityManager.clear()  // Entities in memory are now stale
-}
-```
-
----
-
-## Related Skills
-
-For PostgreSQL-specific features and migrations, see the **postgresql** skill.
-For Spring transaction configuration and service patterns, see the **spring-boot** skill.
-For writing repository tests with Kotest, see the **jasmine** skill (test patterns apply).
+Check for N+1 queries by counting SQL statements in logs.

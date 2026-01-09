@@ -6,9 +6,10 @@ An enterprise-grade online casino platform with player management, wallet system
 
 | Component | Technology | Location | Port |
 |-----------|------------|----------|------|
-| Backend | Kotlin 2.3 / Spring Boot 3.2.5 / Java 21 | `casino-b/` | 8080 |
+| Backend | Kotlin 2.3.0 / Spring Boot 3.2.5 / Java 21 | `casino-b/` | 8080 |
 | Admin Frontend | Angular 17 / TypeScript 5.2 | `casino-f/` | 4200 |
 | Customer Frontend | Angular 17 (standalone) / TypeScript 5.4 | `casino-customer-f/` | 4201 |
+| Shared Library | TypeScript 5.2 | `casino-shared/` | - |
 | Database | PostgreSQL 14+ | DigitalOcean managed | 25060 |
 | Cache | Redis + Caffeine (multi-level) | - | 6379 |
 | Message Broker | Apache Kafka (Confluent Cloud) | - | 9092 |
@@ -104,18 +105,19 @@ ng serve                 # Runs on http://localhost:4201
 
 ```
 casino/
-├── casino-b/                        # Backend (Kotlin/Spring Boot)
+├── casino-b/                        # Backend (Kotlin/Spring Boot) - 992 source files
 │   ├── src/main/kotlin/com/casino/core/
-│   │   ├── controller/              # REST controllers (101 files)
+│   │   ├── controller/              # REST controllers (99 files)
 │   │   ├── service/                 # Business logic (140 files)
-│   │   ├── repository/              # JPA repositories (112 files)
-│   │   ├── domain/                  # JPA entities (107 files)
-│   │   ├── dto/                     # Data transfer objects (104 files)
+│   │   ├── repository/              # JPA repositories (114 files)
+│   │   ├── domain/                  # JPA entities (109 files)
+│   │   ├── dto/                     # Data transfer objects (100 files)
 │   │   ├── kafka/                   # Kafka producers/consumers/config
 │   │   ├── security/                # JWT, OAuth2, guards
-│   │   ├── config/                  # Spring configuration (29 files)
+│   │   ├── config/                  # Spring configuration (27 files)
 │   │   ├── event/                   # Domain events
 │   │   ├── scheduler/               # Scheduled tasks
+│   │   ├── campaigns/               # External campaign integration
 │   │   └── sports/                  # BetBy sports integration
 │   ├── src/main/resources/
 │   │   ├── db/migration/            # Flyway migrations (V{timestamp}__{name}.sql)
@@ -125,13 +127,15 @@ casino/
 │
 ├── casino-f/                        # Admin Frontend (Angular)
 │   └── src/app/
-│       ├── modules/                 # Feature modules (17 modules)
+│       ├── modules/                 # Feature modules (16 modules)
 │       │   ├── player-management/   # Player CRUD, KYC, wallet, bets
 │       │   ├── game-management/     # Games, providers, restrictions
 │       │   ├── campaigns/           # Marketing campaigns
-│       │   ├── cms/                 # Content management
+│       │   ├── cms-admin/           # Content management
 │       │   ├── reporting/           # Analytics & reports
 │       │   ├── payments/            # Payment processing
+│       │   ├── kafka-admin/         # Kafka monitoring
+│       │   ├── logs-explorer/       # OpenSearch logs viewer
 │       │   └── ...
 │       ├── core/                    # Guards, interceptors, services
 │       ├── shared/                  # Shared UI components (ui-*)
@@ -146,15 +150,26 @@ casino/
 │       │   ├── sports/              # BetBy sports betting
 │       │   ├── account/             # Profile, settings
 │       │   ├── kyc/                 # Document verification
+│       │   ├── ai-game-finder/      # AI-powered game recommendations
+│       │   ├── responsible-gambling/# Self-exclusion, limits
 │       │   └── ...
 │       ├── core/                    # Guards, interceptors, models
 │       └── shared/                  # Shared components
+│
+├── casino-shared/                   # Shared TypeScript library (@casino/shared)
+│   └── src/
+│       ├── models/                  # Shared interfaces and types
+│       ├── utils/                   # Common utility functions
+│       └── constants/               # Shared constants
 │
 ├── infra/                           # Production deployment configs
 ├── scripts/                         # Build/deployment scripts
 └── .claude/                         # Claude Code configuration
     ├── agents/                      # Custom agent definitions
-    └── skills/                      # Custom skills (metabase-api)
+    │   ├── backend-unit-test-architect.md
+    │   └── project-task-orchestrator.md
+    └── skills/                      # Custom skills
+        └── metabase-api-skill/      # Metabase API integration
 ```
 
 ## Architecture Overview
@@ -183,11 +198,18 @@ Service → AsyncKafkaPublisher → Circuit Breaker → Kafka (Confluent Cloud)
 | Bonus | `casino.bonus.offered.v1`, `casino.bonus.activated.v1`, `casino.bonus.wagering-updated.v1`, `casino.bonus.converted.v1`, `casino.bonus.forfeited.v1` |
 | Compliance | `casino.compliance.kyc-submitted.v1`, `casino.compliance.kyc-approved.v1`, `casino.compliance.level-upgraded.v1`, `casino.compliance.self-excluded.v1` |
 | Sports | `casino.sports.bet-placed.v1`, `casino.sports.bet-settled.v1` |
+| Engagement | `casino.engagement.*` (gamification events) |
 | System | `casino.dlq.all.v1` (Dead Letter Queue) |
 
 ### WebSocket Real-Time Updates
 - Endpoint: `/ws` (STOMP over WebSocket)
 - Topics: `/topic/balance/{playerId}`, `/topic/bonus/{playerId}`, `/topic/wagering/{playerId}`
+
+### Resilience Patterns
+- **Circuit Breaker**: Resilience4j for external API calls (BetBy, Campaigns, Kafka)
+- **Retry with Backoff**: Configurable retry attempts with exponential backoff
+- **Fallback Storage**: Failed Kafka events stored in database for later retry
+- **Aggregation Circuit Breaker**: Protects reporting/aggregation jobs
 
 ## Code Patterns
 
@@ -483,12 +505,13 @@ if (amount.compareTo(BigDecimal.ZERO) > 0) { ... }
 4. Token validated by OAuth2 Resource Server
 
 ### Security Rules
-- Passwords: BCrypt (cost 12+) or Argon2
+- Passwords: BCrypt (cost 12+) or Argon2 (via Bouncycastle 1.77)
 - JWT: Minimum 64 characters for HS512
 - Input: Jakarta validation on all DTOs
 - SQL: JPA parameterized queries only
 - CORS: Configured in `WebMvcConfig`
 - Frontend tokens: SessionStorage (cleared on tab close)
+- ECDSA: Used for BetBy webhook signature verification
 
 ### Validation Example
 ```kotlin
@@ -531,8 +554,8 @@ ng test
 # Customer frontend
 cd casino-customer-f
 ng test
-playwright test            # E2E tests
-playwright test --ui       # Interactive mode
+npm run e2e              # Run Playwright E2E tests
+npm run e2e:ui           # Interactive mode
 ```
 
 ## Available Commands
@@ -545,6 +568,7 @@ playwright test --ui       # Interactive mode
 | `./gradlew test` | Run tests |
 | `./gradlew flywayMigrate` | Run database migrations |
 | `./gradlew jacocoTestReport` | Generate test coverage |
+| `./gradlew generateBetByKeys` | Generate ECDSA keys for BetBy |
 
 ### Admin Frontend (`casino-f/`)
 | Command | Description |
@@ -562,7 +586,15 @@ playwright test --ui       # Interactive mode
 | `ng serve --configuration de` | Start with German locale |
 | `ng build --configuration production` | Production build |
 | `ng extract-i18n` | Extract translation strings |
-| `playwright test` | Run E2E tests |
+| `npm run e2e` | Run Playwright E2E tests |
+| `npm run e2e:ui` | Run Playwright with UI |
+
+### Shared Library (`casino-shared/`)
+| Command | Description |
+|---------|-------------|
+| `npm run build` | Compile TypeScript |
+| `npm run watch` | Watch mode |
+| `npm run clean` | Remove dist folder |
 
 ## Environment Variables
 
@@ -580,6 +612,7 @@ playwright test --ui       # Interactive mode
 | `DO_SPACES_ACCESS_KEY` | Yes | DigitalOcean Spaces (S3) |
 | `DO_SPACES_SECRET_KEY` | Yes | DigitalOcean Spaces secret |
 | `CLAUDE_API_KEY` | No | Claude AI for KYC analysis |
+| `BETBY_BRAND_ID` | No | BetBy sports integration |
 
 See `.env.example` for full list.
 
@@ -594,8 +627,16 @@ See `.env.example` for full list.
 | Confluent Cloud | Kafka messaging | `spring.kafka.*` |
 | OpenSearch | Exception logging | `opensearch.*` |
 | Claude AI | KYC document analysis | `claude.api.*` |
+| Google Vertex AI | Gemini for game recommendations | `google.cloud.*` |
 | Smartico | Gamification | `smartico.*` |
-| Cellxpert | Affiliate tracking | via `CellxpertService` |
+| Cellxpert | Affiliate tracking with transaction metrics | via `CellxpertService` |
+| Frankfurter API | Currency exchange rates | `casino.currency-exchange.*` |
+
+### Export Capabilities
+The platform supports exporting data in multiple formats:
+- **Excel**: Apache POI 5.4.0
+- **PDF**: iText 7.2.5
+- **CSV**: Jackson CSV dataformat
 
 ## Internationalization (i18n)
 
@@ -630,6 +671,12 @@ rm -rf node_modules && npm i   # Clear npm cache
 ### Type Mismatch in JPA
 Ensure `BIGSERIAL` → `Long`, `DECIMAL` → `BigDecimal`, `TIMESTAMP WITH TIME ZONE` → `LocalDateTime`.
 
+### Large File Uploads
+Server configured for 100MB max file size. Check `spring.servlet.multipart.*` settings.
+
+### Circuit Breaker Open
+External service failures trigger circuit breakers. Check Resilience4j metrics and retry after cooldown period.
+
 ## Git Commit Conventions
 
 ```
@@ -637,12 +684,11 @@ Ensure `BIGSERIAL` → `Long`, `DECIMAL` → `BigDecimal`, `TIMESTAMP WITH TIME 
 
 Longer explanation if needed.
 
-🤖 Generated with Claude Code
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### Component Prefixes
-`[Auth]` `[Player]` `[Game]` `[Bonus]` `[Wallet]` `[DB]` `[UI]` `[API]` `[Fix]` `[Perf]` `[Refactor]` `[Kafka]` `[Sports]` `[KYC]` `[CMS]`
+`[Auth]` `[Player]` `[Game]` `[Bonus]` `[Wallet]` `[DB]` `[UI]` `[API]` `[Fix]` `[Perf]` `[Refactor]` `[Kafka]` `[Sports]` `[KYC]` `[CMS]` `[Affiliate]` `[Admin]` `[Frontend]` `[Infra]`
 
 ## Pre-Submit Checklist
 
@@ -689,12 +735,23 @@ The `Player` entity is central to the platform. Key fields include:
 - **Activation**: `AUTOMATIC`, `MANUAL_CLAIM`, `DEPOSIT_SELECTION`
 - **Rewards**: Money bonuses, free spins, sports bonuses
 - **Wagering**: Configurable multipliers, mode (bonus only vs deposit+bonus)
+- **Categories**: Sports vs Slots selection (bonus category toggle feature)
 
----
+### Affiliate System (Cellxpert)
+- **Player Feed**: `/api/v1/cellxpert/players` with transaction metrics
+- **Metrics**: FirstDepositDate, TotalDepositAmount, NetDeposit, DepositCount, WithdrawalCount
+- **Multi-currency aggregation**: Calculates primary currency by highest deposits
+- **Scheduler**: `CellxpertActivityRefreshScheduler` for periodic sync
 
-**Project Status**: Active development
-**Last Updated**: 2025-01-05
+## Custom Claude Code Agents
 
+This project includes specialized Claude Code agents in `.claude/agents/`:
+
+### backend-unit-test-architect
+Use for designing and writing unit tests for Kotlin/Spring Boot code. Specializes in MockK, JUnit 5, and comprehensive testing strategies.
+
+### project-task-orchestrator
+Use for coordinating complex multi-task development workflows. Parses task documents and delegates to specialized sub-agents.
 
 ## Skill Usage Guide
 
@@ -706,10 +763,39 @@ When working on tasks involving these technologies, invoke the corresponding ski
 | redis | Redis caching with Spring Cache abstraction and Caffeine L1 cache |
 | jpa | JPA entities, repositories, and Hibernate ORM patterns |
 | postgresql | PostgreSQL database design, Flyway migrations, and JPA queries |
-| jasmine | Jasmine/Karma unit testing for Angular components and services |
-| typescript | TypeScript type patterns and strict mode |
 | spring-boot | Spring Boot 3.2.5 REST controllers, services, and configuration |
-| playwright | Playwright E2E testing for customer frontend |
 | angular | Angular 17 components, services, routing, and reactive patterns |
-| kotlin | Kotlin language patterns, coroutines, and Spring Boot integration |
+| playwright | Playwright E2E testing for customer frontend |
 | frontend-design | Angular UI components with CSS styling and responsive design |
+| metabase-api-skill | Metabase SQL cards, queries, and collection management |
+
+---
+
+**Project Status**: Active development
+**Last Updated**: 2026-01-10
+
+## Additional Resources
+
+- @AGENTS.md - Git submodule workflow and agent instructions
+- @QA_TESTING_GUIDE.md - Manual QA testing procedures for CellExpert and Bonus features
+- @README.md - Project overview and setup
+
+
+## Skill Usage Guide
+
+When working on tasks involving these technologies, invoke the corresponding skill:
+
+| Skill | Invoke When |
+|-------|-------------|
+| playwright | Playwright E2E testing for customer frontend |
+| kotlin | Kotlin 2.3.0 language patterns, coroutines, and Spring integration |
+| metabase-api-skill | Metabase SQL cards, queries, and collection management |
+| jpa | JPA entities, repositories, and Hibernate ORM patterns |
+| postgresql | PostgreSQL 14+ database design, Flyway migrations, and JPA queries |
+| kafka | Apache Kafka event publishing, topics, and async message handling |
+| redis | Redis caching with Spring Cache abstraction and Caffeine L1 cache |
+| frontend-design | Angular UI components with Material Design and responsive layouts |
+| spring-boot | Spring Boot 3.2.5 REST controllers, services, and configuration |
+| typescript | TypeScript 5.2+ type patterns and strict mode |
+| angular | Angular 17 standalone components, RxJS, and reactive forms |
+| java | Java 21 runtime, JVM patterns, and Spring Boot configuration |

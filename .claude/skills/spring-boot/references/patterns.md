@@ -1,31 +1,25 @@
-# Spring Boot Patterns
+# Spring Boot Patterns Reference
 
 ## Controller Patterns
 
 ### Standard REST Controller
 
+Controllers follow a consistent pattern with OpenAPI documentation and method-level security.
+
 ```kotlin
 @RestController
-@RequestMapping("/api/v1/bonuses")
-@Tag(name = "Bonuses", description = "Bonus management API")
-class BonusController(
-    private val bonusService: BonusService
+@RequestMapping("/api/v1/wallets")
+@Tag(name = "Wallets", description = "Wallet and transaction management API")
+class WalletController(
+    private val walletService: WalletService
 ) {
-    @GetMapping
-    @Operation(summary = "List bonuses with pagination")
-    fun list(@PageableDefault(size = 20) pageable: Pageable): Page<BonusDto> {
-        return bonusService.findAll(pageable)
-    }
+    private val logger = LoggerFactory.getLogger(javaClass)
 
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    fun create(@Valid @RequestBody request: CreateBonusRequest): BonusDto {
-        return bonusService.create(request)
-    }
-
-    @PatchMapping("/{id}/activate")
-    fun activate(@PathVariable id: Long): BonusDto {
-        return bonusService.activate(id)
+    @GetMapping("/{playerId}/balance")
+    @Operation(summary = "Get player wallet balance")
+    @PreAuthorize("hasAnyAuthority('PLAYER') and #playerId == authentication.principal.username or hasAnyAuthority('ADMIN')")
+    fun getBalance(@PathVariable playerId: Long): ResponseEntity<WalletSummaryResponse> {
+        return ResponseEntity.ok(walletService.getWalletSummary(playerId))
     }
 }
 ```
@@ -35,212 +29,178 @@ class BonusController(
 **The Problem:**
 
 ```kotlin
-// BAD - Controller doing service work
+// BAD - Controller doing too much
 @PostMapping
-fun create(@RequestBody request: CreatePlayerRequest): ResponseEntity<Player> {
-    if (playerRepository.existsByEmail(request.email)) {
-        throw ResourceAlreadyExistsException("Email exists")
+fun createDeposit(@RequestBody request: DepositRequest): ResponseEntity<*> {
+    val player = playerRepository.findById(request.playerId).orElseThrow()
+    if (player.status != PlayerStatus.ACTIVE) {
+        return ResponseEntity.badRequest().body("Player not active")
     }
-    val player = Player(email = request.email)
-    val saved = playerRepository.save(player)
-    walletRepository.save(Wallet(player = saved))
-    return ResponseEntity.status(201).body(saved)
+    val wallet = walletRepository.findByPlayerId(request.playerId)
+    wallet.balance = wallet.balance.add(request.amount)
+    walletRepository.save(wallet)
+    return ResponseEntity.ok(wallet)
 }
 ```
 
 **Why This Breaks:**
 1. Untestable without full Spring context
-2. Transaction boundaries are wrong - wallet creation not atomic
-3. No caching, no events, violates SRP
+2. Transaction boundaries unclear
+3. No separation of concerns - impossible to reuse logic
 
 **The Fix:**
 
 ```kotlin
 // GOOD - Controller delegates to service
 @PostMapping
-@ResponseStatus(HttpStatus.CREATED)
-fun create(@Valid @RequestBody request: CreatePlayerRequest): PlayerDto {
-    return playerService.registerPlayer(request)
+fun createDeposit(@Valid @RequestBody request: DepositRequest): ResponseEntity<DepositResponse> {
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(walletService.processDeposit(request))
 }
 ```
 
-**When You Might Be Tempted:** Simple CRUD operations where "it's just one line."
+**When You Might Be Tempted:** Quick prototypes, "simple" endpoints that grow complex over time.
 
 ---
 
-## Service Patterns
+## Service Layer Patterns
 
-### Transactional Service
+### Transactional Service with Caching
 
 ```kotlin
 @Service
-class WalletService(
-    private val walletRepository: WalletRepository,
-    private val transactionRepository: TransactionRepository
+class PlayerService(
+    private val repository: PlayerRepository,
+    private val eventService: PlayerEventService
 ) {
     @Transactional(readOnly = true)
-    fun getBalance(playerId: Long): WalletDto {
-        return walletRepository.findByPlayerId(playerId)
-            .map { WalletDto.from(it) }
-            .orElseThrow { ResourceNotFoundException("Wallet not found") }
+    @Cacheable(cacheNames = ["playerDetails"], key = "'player:id:' + #id")
+    fun getPlayerById(id: Long): PlayerDetailsResponse {
+        val player = repository.findByIdWithDetails(id)
+            .orElseThrow { ResourceNotFoundException("Player not found: $id") }
+        return mapToPlayerDetailsResponse(player)
     }
 
     @Transactional
-    fun debit(playerId: Long, amount: BigDecimal): WalletDto {
-        val wallet = walletRepository.findByPlayerIdForUpdate(playerId)
-            .orElseThrow { ResourceNotFoundException("Wallet not found") }
-        
-        if (wallet.balance < amount) {
-            throw InsufficientFundsException("Insufficient balance")
-        }
-        
-        wallet.balance = wallet.balance.subtract(amount)
-        transactionRepository.save(Transaction(wallet = wallet, amount = amount.negate()))
-        return WalletDto.from(walletRepository.save(wallet))
+    @Caching(
+        evict = [
+            CacheEvict(cacheNames = ["playerDetails"], key = "'player:id:' + #id"),
+            CacheEvict(cacheNames = ["playerEntity"], allEntries = true)
+        ]
+    )
+    fun updatePlayerStatus(id: Long, status: PlayerStatus): PlayerDetailsResponse {
+        val player = repository.findById(id)
+            .orElseThrow { ResourceNotFoundException("Player not found: $id") }
+        val updated = player.copy(status = status, updatedAt = LocalDateTime.now())
+        return mapToPlayerDetailsResponse(repository.save(updated))
     }
 }
 ```
 
-### WARNING: Missing @Transactional on Write Operations
+### WARNING: Throwing Exceptions in Event Publishers
 
 **The Problem:**
 
 ```kotlin
-// BAD - No transaction boundary
-fun transferFunds(from: Long, to: Long, amount: BigDecimal) {
-    val sourceWallet = walletRepository.findById(from).get()
-    sourceWallet.balance = sourceWallet.balance.subtract(amount)
-    walletRepository.save(sourceWallet)
-    
-    val destWallet = walletRepository.findById(to).get() // Fails here?
-    destWallet.balance = destWallet.balance.add(amount)
-    walletRepository.save(destWallet)
+// BAD - Event failure breaks main flow
+@Transactional
+fun registerPlayer(request: PlayerRegistrationRequest): PlayerResponse {
+    val player = repository.save(Player(username = request.username))
+    eventService.publishPlayerRegistered(player) // If this throws, registration fails!
+    return PlayerResponse.from(player)
 }
 ```
 
 **Why This Breaks:**
-1. If second save fails, money disappears
-2. Race conditions with concurrent requests
-3. No rollback capability
+1. Kafka unavailability breaks user registration
+2. Event publishing is secondary to core business logic
+3. User sees error even though registration succeeded
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Atomic transaction
+// GOOD - Fire-and-forget pattern
 @Transactional
-fun transferFunds(from: Long, to: Long, amount: BigDecimal) {
-    val sourceWallet = walletRepository.findByIdForUpdate(from).get()
-    val destWallet = walletRepository.findByIdForUpdate(to).get()
-    // Both succeed or both rollback
-    sourceWallet.balance = sourceWallet.balance.subtract(amount)
-    destWallet.balance = destWallet.balance.add(amount)
-}
-```
-
----
-
-## Caching Patterns
-
-### Multi-Level Cache Usage
-
-```kotlin
-@Service
-class GameService(
-    private val gameRepository: GameRepository
-) {
-    // L1 (Caffeine) → L2 (Redis) → Database
-    @Cacheable(value = ["games"], key = "#id")
-    fun findById(id: Long): GameDto {
-        return gameRepository.findById(id)
-            .map { GameDto.from(it) }
-            .orElseThrow { ResourceNotFoundException("Game not found") }
-    }
-
-    @CacheEvict(value = ["games"], key = "#result.id")
-    @Transactional
-    fun update(id: Long, request: UpdateGameRequest): GameDto {
-        val game = gameRepository.findById(id).orElseThrow { ... }
-        game.apply { name = request.name }
-        return GameDto.from(gameRepository.save(game))
-    }
-}
-```
-
-### WARNING: Caching Mutable Objects
-
-**The Problem:**
-
-```kotlin
-// BAD - Returns mutable entity, cache gets corrupted
-@Cacheable(value = ["players"], key = "#id")
-fun findById(id: Long): Player {
-    return playerRepository.findById(id).get()
-}
-
-// Caller modifies cached object
-val player = playerService.findById(1)
-player.status = PlayerStatus.BLOCKED // Corrupts cache!
-```
-
-**The Fix:**
-
-```kotlin
-// GOOD - Return immutable DTO
-@Cacheable(value = ["players"], key = "#id")
-fun findById(id: Long): PlayerDto {
-    return playerRepository.findById(id)
-        .map { PlayerDto.from(it) }
-        .orElseThrow { ResourceNotFoundException("Player not found") }
-}
-```
-
----
-
-## Exception Pattern
-
-### Custom Exception Hierarchy
-
-```kotlin
-// Base exceptions with proper HTTP status
-@ResponseStatus(HttpStatus.NOT_FOUND)
-class ResourceNotFoundException(message: String) : RuntimeException(message)
-
-@ResponseStatus(HttpStatus.CONFLICT)
-class ResourceAlreadyExistsException(message: String) : RuntimeException(message)
-
-@ResponseStatus(HttpStatus.PAYMENT_REQUIRED)
-class InsufficientFundsException(message: String) : RuntimeException(message)
-
-@ResponseStatus(HttpStatus.PRECONDITION_FAILED)
-class BusinessRuleViolationException(message: String) : RuntimeException(message)
-```
-
-### WARNING: Swallowing Exceptions Silently
-
-**The Problem:**
-
-```kotlin
-// BAD - Silent failure
-fun processPayment(amount: BigDecimal) {
+fun registerPlayer(request: PlayerRegistrationRequest): PlayerResponse {
+    val player = repository.save(Player(username = request.username))
     try {
-        paymentGateway.charge(amount)
+        eventService.publishPlayerRegistered(player)
     } catch (e: Exception) {
-        // Nothing happens - payment fails silently
+        logger.error("Failed to publish player registered event: ${player.id}", e)
+        // Don't throw - event publishing should not break main flow
+    }
+    return PlayerResponse.from(player)
+}
+```
+
+**When You Might Be Tempted:** When you want "guaranteed" event delivery (use outbox pattern instead).
+
+---
+
+## Configuration Patterns
+
+### Externalized Configuration with Defaults
+
+```kotlin
+@Configuration
+class AsyncConfig {
+    @Value("\${async.wallet.core-size:32}")
+    private var walletCoreSize: Int = 32
+
+    @Value("\${async.wallet.max-size:128}")
+    private var walletMaxSize: Int = 128
+
+    @Bean("walletAsyncExecutor")
+    fun walletAsyncExecutor(): Executor {
+        val executor = ThreadPoolTaskExecutor()
+        executor.corePoolSize = walletCoreSize
+        executor.maxPoolSize = walletMaxSize
+        executor.setThreadNamePrefix("wallet-async-")
+        executor.setRejectedExecutionHandler(ThreadPoolExecutor.CallerRunsPolicy())
+        executor.setWaitForTasksToCompleteOnShutdown(true)
+        executor.setAwaitTerminationSeconds(60)
+        executor.initialize()
+        return executor
     }
 }
 ```
 
+### WARNING: Hardcoded Configuration Values
+
+**The Problem:**
+
+```kotlin
+// BAD - Hardcoded values
+@Bean
+fun restTemplate(): RestTemplate {
+    return RestTemplateBuilder()
+        .setConnectTimeout(Duration.ofSeconds(10))
+        .setReadTimeout(Duration.ofSeconds(30))
+        .build()
+}
+```
+
+**Why This Breaks:**
+1. Can't tune for different environments
+2. Requires code change and redeploy to adjust
+3. No visibility into what values are configured
+
 **The Fix:**
 
 ```kotlin
-// GOOD - Log and handle appropriately
-fun processPayment(amount: BigDecimal) {
-    try {
-        paymentGateway.charge(amount)
-    } catch (e: PaymentGatewayException) {
-        logger.error("Payment failed: ${e.message}", e)
-        throw ExternalServiceException("Payment processing failed")
-    }
+// GOOD - Externalized with sensible defaults
+@Value("\${http.client.connect-timeout-seconds:10}")
+private var connectTimeout: Long = 10
+
+@Value("\${http.client.read-timeout-seconds:30}")
+private var readTimeout: Long = 30
+
+@Bean
+fun restTemplate(): RestTemplate {
+    return RestTemplateBuilder()
+        .setConnectTimeout(Duration.ofSeconds(connectTimeout))
+        .setReadTimeout(Duration.ofSeconds(readTimeout))
+        .build()
 }
 ```
 
@@ -248,26 +208,76 @@ fun processPayment(amount: BigDecimal) {
 
 ## Security Patterns
 
-### Method-Level Security
+### JWT + OAuth2 Resource Server
 
 ```kotlin
-@RestController
-@RequestMapping("/api/v1/admin/players")
-class AdminPlayerController(private val playerService: PlayerService) {
-
-    @GetMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
-    fun listAll(pageable: Pageable): Page<PlayerDto> {
-        return playerService.findAll(pageable)
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+class SecurityConfig(
+    private val jwtAuthenticationFilter: JwtAuthenticationFilter
+) {
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        return http
+            .csrf { it.disable() }
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .authorizeHttpRequests { authorize ->
+                authorize
+                    .requestMatchers("/api/auth/**").permitAll()
+                    .requestMatchers("/actuator/**").permitAll()
+                    .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                    .anyRequest().authenticated()
+            }
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
+            .build()
     }
 
-    @PatchMapping("/{id}/block")
-    @PreAuthorize("hasAuthority('ADMIN') and !#id.equals(authentication.principal.id)")
-    fun blockPlayer(@PathVariable id: Long): PlayerDto {
-        return playerService.updateStatus(id, PlayerStatus.BLOCKED)
+    @Bean
+    fun passwordEncoder(): PasswordEncoder {
+        return Argon2PasswordEncoder(16, 32, 1, 65536, 4)
     }
 }
 ```
 
-See the **jpa** skill for entity mapping and query patterns.
-See the **kafka** skill for event publishing details.
+---
+
+## Exception Handling Patterns
+
+### Global Exception Handler with Logging
+
+```kotlin
+@RestControllerAdvice
+class GlobalExceptionHandler(
+    private val exceptionLoggingService: Optional<ExceptionLoggingService>
+) {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(ResourceNotFoundException::class)
+    fun handleNotFound(ex: ResourceNotFoundException, request: WebRequest): ResponseEntity<ErrorResponse> {
+        return ResponseEntity(
+            ErrorResponse(
+                timestamp = LocalDateTime.now(),
+                status = HttpStatus.NOT_FOUND.value(),
+                error = "Not Found",
+                message = ex.message ?: "Resource not found",
+                path = request.getDescription(false).substringAfter("uri=")
+            ),
+            HttpStatus.NOT_FOUND
+        )
+    }
+
+    @ExceptionHandler(Exception::class)
+    fun handleGlobalException(ex: Exception, request: WebRequest): ResponseEntity<ErrorResponse> {
+        logger.error("Unhandled exception", ex)
+        // Log 5xx to OpenSearch
+        exceptionLoggingService.ifPresent { it.logException(request, ex) }
+        return ResponseEntity(
+            ErrorResponse(status = 500, error = "Internal Server Error", message = ex.message ?: ""),
+            HttpStatus.INTERNAL_SERVER_ERROR
+        )
+    }
+}
+```
+
+See the **jpa** skill for repository patterns and the **kafka** skill for event publishing.

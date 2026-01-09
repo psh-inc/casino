@@ -1,128 +1,110 @@
 ---
 name: frontend-design
 description: |
-  Angular UI components with CSS styling and responsive design for the casino platform.
-  Use when: Creating new UI components, styling pages, implementing responsive layouts,
-  adding animations, or maintaining visual consistency across admin/customer frontends.
+  Angular UI components with Material Design, SCSS design system, and responsive layouts.
+  Use when: Creating new UI components, styling pages, implementing responsive layouts, adding animations, or maintaining visual consistency across admin/customer frontends.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
-# Frontend Design Skill
+# Frontend-design Skill
 
-This skill covers Angular UI component design for a dual-frontend casino platform: Admin (Tailwind + SCSS) and Customer (premium dark theme with glassmorphism). The design system emphasizes type-safe component variants, accessibility compliance, and performance-optimized animations.
+This casino platform uses a dual-styling approach: **Tailwind CSS** for the admin frontend (`casino-f/`) and a **custom SCSS design system** for the customer frontend (`casino-customer-f/`). The customer frontend features a dark, premium casino aesthetic with glassmorphism effects, neon accents, and mobile-first responsive patterns.
 
 ## Quick Start
 
-### Button Component Pattern (Admin Frontend)
+### Import Design System (Customer Frontend)
 
-```typescript
-// casino-f/src/app/shared/ui/ui-button.component.ts
-@Component({
-  selector: 'ui-button',
-  standalone: true,
-  template: `<button [ngClass]="buttonClasses()">...</button>`
-})
-export class UiButtonComponent {
-  @Input() variant: 'primary' | 'secondary' | 'ghost' | 'danger' = 'primary';
-  @Input() size: 'xs' | 'sm' | 'md' | 'lg' = 'md';
+```scss
+// Always import at the top of component styles
+@import '../../../styles/design-system.scss';
 
-  buttonClasses = computed(() => {
-    const base = 'inline-flex items-center justify-center gap-2 font-semibold transition-all rounded-lg';
-    const variantClass = {
-      primary: 'bg-primary-600 text-white hover:bg-primary-700',
-      danger: 'bg-danger-600 text-white hover:bg-danger-700'
-    };
-    return `${base} ${variantClass[this.variant()]}`;
-  });
+.my-component {
+  @include glassmorphism;
+  background: $gradient-card;
+  border-radius: $radius-lg;
+  padding: $space-6;
+  color: $color-text-primary;
 }
 ```
 
-### Casino Button with CVA (Customer Frontend)
+### Glass Button Pattern
 
-```typescript
-// casino-customer-f/src/app/shared/ui/button.component.ts
-import { cva } from 'class-variance-authority';
-
-const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-all",
-  {
-    variants: {
-      variant: {
-        casino: "bg-gradient-to-r from-[#3aa660] to-[#52ea88] text-white",
-        casinoPurple: "bg-gradient-to-r from-[#8b5cf6] to-[#a855f7] text-white"
-      },
-      size: { default: "h-9 px-4 py-2", lg: "h-10 rounded-md px-6" }
-    }
+```scss
+.glass-button {
+  @include button-base;
+  background: $glass-background;
+  backdrop-filter: blur(10px);
+  border: 1px solid $glass-border;
+  color: $color-text-primary;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
   }
-);
+}
 ```
 
 ## Key Concepts
 
-| Concept | Admin Frontend | Customer Frontend |
-|---------|----------------|-------------------|
-| Framework | Tailwind CSS + SCSS | Custom SCSS Design System |
-| Theme | Light (indigo primary) | Dark casino (teal/green) |
-| Components | `ui-*` prefix | Standalone components |
-| Icons | Heroicons (via ui-icon) | Inline SVGs |
-| Fonts | Roboto (14px base) | Rubik, Montserrat, Inter |
-| Touch Target | 44px minimum | 48px minimum |
+| Concept | Usage | Example |
+|---------|-------|---------|
+| Design tokens | SCSS variables for colors, spacing, typography | `$color-green`, `$space-4` |
+| Glassmorphism | Semi-transparent backgrounds with blur | `@include glassmorphism` |
+| Neon glow | Text shadow effects for emphasis | `@include neon-glow($color-neon-teal)` |
+| Mobile-first | 48px minimum touch targets, 16px font for iOS | `min-height: 44px` |
 
 ## Common Patterns
 
-### Responsive Game Grid
+### Card Component
 
-**When:** Displaying game cards in the casino lobby
+**When:** Creating any content container (games, promotions, user info)
 
 ```scss
-// casino-customer-f/src/app/features/games/components/casino-page/styles/_game-grid.scss
+.feature-card {
+  @include card-base;
+  padding: $space-6;
+  
+  .card-title {
+    @include heading-style;
+    font-size: $text-xl;
+    margin-bottom: $space-4;
+  }
+  
+  .card-content {
+    @include body-text;
+  }
+}
+```
+
+### Responsive Grid
+
+**When:** Displaying game lists, promotion grids
+
+```scss
 .game-grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(2, 1fr);  // Mobile: 2 cols
-
-  @media (min-width: 768px) { grid-template-columns: repeat(4, 1fr); }
-  @media (min-width: 1280px) { grid-template-columns: repeat(6, 1fr); }
+  gap: $space-4;
+  grid-template-columns: repeat(2, 1fr);
+  
+  @media (min-width: $screen-md) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  @media (min-width: $screen-lg) {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
-```
-
-### Glassmorphism Card
-
-**When:** Creating premium UI elements in customer frontend
-
-```scss
-@mixin glassmorphism {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-}
-```
-
-### Form Section (Admin)
-
-**When:** Creating data entry forms in admin panel
-
-```html
-<div class="ui-section">
-  <h3 class="ui-section-title">Player Details</h3>
-  <div class="ui-form">
-    <ui-form-field label="Email" [required]="true">
-      <ui-input formControlName="email" type="email"></ui-input>
-    </ui-form-field>
-  </div>
-</div>
 ```
 
 ## See Also
 
-- [aesthetics](references/aesthetics.md) - Typography, colors, visual identity
-- [components](references/components.md) - UI component patterns
-- [layouts](references/layouts.md) - Grid systems, responsive breakpoints
-- [motion](references/motion.md) - Animations, transitions
-- [patterns](references/patterns.md) - Anti-patterns, best practices
+- [aesthetics](references/aesthetics.md)
+- [components](references/components.md)
+- [layouts](references/layouts.md)
+- [motion](references/motion.md)
+- [patterns](references/patterns.md)
 
 ## Related Skills
 
-- See the **angular** skill for component architecture and RxJS patterns
-- See the **typescript** skill for type-safe styling with CVA
+- **angular** - For component architecture and reactive patterns
+- **typescript** - For type-safe component interfaces

@@ -1,308 +1,261 @@
-# Spring Boot Workflows
+# Spring Boot Workflows Reference
 
 ## Development Workflow
 
-### Starting the Backend
+### Creating a New REST Endpoint
 
-```bash
-cd casino-b
-cp ../.env.example .env  # Configure credentials
-./gradlew clean build    # Compile and test
-./gradlew bootRun        # Start on port 8080
-```
-
-### Running Tests
-
-```bash
-# All tests
-./gradlew test
-
-# Specific test class
-./gradlew test --tests "PlayerServiceTest"
-
-# With coverage report
-./gradlew jacocoTestReport
-```
-
----
-
-## Creating a New Endpoint
-
-### 1. Define the DTO
+1. **Define the DTO** with Jakarta validation:
 
 ```kotlin
-// src/main/kotlin/com/casino/core/dto/CreateBonusRequest.kt
-data class CreateBonusRequest(
-    @field:NotBlank(message = "Name is required")
-    val name: String,
+data class CreatePlayerRequest(
+    @field:NotBlank(message = "Username is required")
+    @field:Size(min = 3, max = 50, message = "Username must be 3-50 characters")
+    val username: String,
 
-    @field:NotNull(message = "Amount is required")
-    @field:DecimalMin(value = "0.01", message = "Amount must be positive")
-    val amount: BigDecimal,
+    @field:NotBlank(message = "Email is required")
+    @field:Email(message = "Invalid email format")
+    val email: String,
 
-    @field:NotNull
-    val type: BonusType
+    @field:NotBlank(message = "Password is required")
+    @field:Size(min = 8, max = 100, message = "Password must be 8-100 characters")
+    val password: String
 )
 ```
 
-### 2. Create the Service Method
+2. **Create the service method** with proper transactions:
 
 ```kotlin
 @Service
-class BonusService(
-    private val bonusRepository: BonusRepository,
-    private val eventPublisher: EventPublisher
-) {
-    private val logger = LoggerFactory.getLogger(javaClass)
-
+class PlayerService(private val repository: PlayerRepository) {
     @Transactional
-    fun create(request: CreateBonusRequest): BonusDto {
-        val bonus = Bonus(
-            name = request.name,
-            amount = request.amount,
-            type = request.type
-        )
-        val saved = bonusRepository.save(bonus)
-        
-        // Fire-and-forget event
-        try {
-            eventPublisher.publish(KafkaTopics.BONUS_CREATED, saved.id.toString(), event)
-        } catch (e: Exception) {
-            logger.error("Event publish failed", e)
+    fun create(request: CreatePlayerRequest): PlayerDto {
+        if (repository.existsByUsername(request.username)) {
+            throw ResourceAlreadyExistsException("Username already exists")
         }
-        
-        return BonusDto.from(saved)
+        val player = repository.save(Player(
+            username = request.username,
+            email = request.email
+        ))
+        return PlayerDto.from(player)
     }
 }
 ```
 
-### 3. Add Controller Endpoint
+3. **Add the controller endpoint**:
 
 ```kotlin
-@RestController
-@RequestMapping("/api/v1/admin/bonuses")
-@Tag(name = "Bonus Admin", description = "Bonus administration API")
-class BonusAdminController(private val bonusService: BonusService) {
-
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Create a new bonus")
-    @PreAuthorize("hasAuthority('ADMIN')")
-    fun create(@Valid @RequestBody request: CreateBonusRequest): BonusDto {
-        return bonusService.create(request)
-    }
+@PostMapping
+@ResponseStatus(HttpStatus.CREATED)
+@Operation(summary = "Create a new player")
+fun create(@Valid @RequestBody request: CreatePlayerRequest): PlayerDto {
+    return playerService.create(request)
 }
 ```
+
+4. **Document in `docs/api/`** if it's a new API.
 
 ---
 
-## Testing Patterns
+## Testing Workflow
 
-### Unit Testing Services with MockK
+### Service Layer Testing with MockK
 
 ```kotlin
 @ExtendWith(MockKExtension::class)
-class BonusServiceTest {
+class PlayerServiceTest {
+    @MockK
+    private lateinit var repository: PlayerRepository
 
     @MockK
-    private lateinit var bonusRepository: BonusRepository
-
-    @MockK
-    private lateinit var eventPublisher: EventPublisher
+    private lateinit var eventService: PlayerEventService
 
     @InjectMockKs
-    private lateinit var bonusService: BonusService
+    private lateinit var service: PlayerService
 
     @Test
-    fun `create should save bonus and return DTO`() {
+    fun `should create player successfully`() {
         // Given
-        val request = CreateBonusRequest(
-            name = "Welcome Bonus",
-            amount = BigDecimal("100.00"),
-            type = BonusType.DEPOSIT
-        )
-        val savedBonus = Bonus(id = 1L, name = "Welcome Bonus", ...)
-        
-        every { bonusRepository.save(any()) } returns savedBonus
-        every { eventPublisher.publish(any(), any(), any<Any>()) } just Runs
+        val request = CreatePlayerRequest(username = "testuser", email = "test@example.com")
+        val savedPlayer = Player(id = 1L, username = "testuser", email = "test@example.com")
+
+        every { repository.existsByUsername("testuser") } returns false
+        every { repository.save(any()) } returns savedPlayer
+        every { eventService.publishPlayerRegistered(any()) } just runs
 
         // When
-        val result = bonusService.create(request)
+        val result = service.create(request)
 
         // Then
-        assertThat(result.name).isEqualTo("Welcome Bonus")
-        verify { bonusRepository.save(any()) }
+        assertThat(result.id).isEqualTo(1L)
+        assertThat(result.username).isEqualTo("testuser")
+        verify { repository.save(any()) }
     }
 }
 ```
 
-### Integration Testing with @SpringBootTest
-
-```kotlin
-@SpringBootTest
-@AutoConfigureMockMvc
-@Transactional
-class BonusControllerIntegrationTest {
-
-    @Autowired
-    private lateinit var mockMvc: MockMvc
-
-    @Autowired
-    private lateinit var objectMapper: ObjectMapper
-
-    @Test
-    @WithMockUser(authorities = ["ADMIN"])
-    fun `POST should create bonus and return 201`() {
-        val request = CreateBonusRequest(
-            name = "Test Bonus",
-            amount = BigDecimal("50.00"),
-            type = BonusType.DEPOSIT
-        )
-
-        mockMvc.perform(
-            post("/api/v1/admin/bonuses")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(request))
-        )
-            .andExpect(status().isCreated)
-            .andExpect(jsonPath("$.name").value("Test Bonus"))
-    }
-}
-```
-
----
-
-## Database Migrations
-
-### Creating a New Migration
-
-```sql
--- src/main/resources/db/migration/V20250106120000__add_bonus_table.sql
-CREATE TABLE bonuses (
-    id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    amount DECIMAL(19, 2) NOT NULL,
-    type VARCHAR(50) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_bonuses_type ON bonuses(type);
-```
-
-### WARNING: Using SERIAL Instead of BIGSERIAL
+### WARNING: Not Using `readOnly = true` for Queries
 
 **The Problem:**
 
-```sql
--- BAD - Will overflow at 2.1 billion records
-CREATE TABLE players (
-    id SERIAL PRIMARY KEY,
-    ...
-);
+```kotlin
+// BAD - Missing readOnly flag
+@Transactional
+fun findAll(pageable: Pageable): Page<PlayerDto> {
+    return repository.findAll(pageable).map { PlayerDto.from(it) }
+}
 ```
 
 **Why This Breaks:**
-1. SERIAL is 4 bytes (max 2,147,483,647)
-2. High-volume tables hit this in production
-3. Migration to BIGSERIAL requires downtime
+1. Database connection held in write mode unnecessarily
+2. Hibernate dirty checking runs for all entities
+3. Potential for accidental writes
+4. Worse performance under load
 
 **The Fix:**
 
-```sql
--- GOOD - 8 bytes, practically unlimited
-CREATE TABLE players (
-    id BIGSERIAL PRIMARY KEY,
-    ...
-);
+```kotlin
+// GOOD - Explicit read-only transaction
+@Transactional(readOnly = true)
+fun findAll(pageable: Pageable): Page<PlayerDto> {
+    return repository.findAll(pageable).map { PlayerDto.from(it) }
+}
 ```
 
 ---
 
-## Configuration Best Practices
+## Caching Workflow
 
-### Environment-Specific Configuration
+### Adding Cache to a Service Method
 
-```yaml
-# application.yml - defaults
-spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL}
-    username: ${SPRING_DATASOURCE_USERNAME}
-    password: ${SPRING_DATASOURCE_PASSWORD}
-  
-cache:
-  multilevel:
-    enabled: true
+1. **Define cache in configuration**:
 
----
-# application-dev.yml - development overrides
-spring:
-  config:
-    activate:
-      on-profile: dev
-      
-logging:
-  level:
-    com.casino: DEBUG
+```kotlin
+@Bean
+fun playerCache(): Cache<Long, PlayerDto> {
+    return Caffeine.newBuilder()
+        .maximumSize(10_000)
+        .expireAfterWrite(Duration.ofMinutes(5))
+        .recordStats()
+        .build()
+}
 ```
 
-### WARNING: Hardcoded Secrets
+2. **Add `@Cacheable` to read methods**:
+
+```kotlin
+@Cacheable(cacheNames = ["players"], key = "'player:' + #id")
+@Transactional(readOnly = true)
+fun findById(id: Long): PlayerDto { ... }
+```
+
+3. **Add `@CacheEvict` to write methods**:
+
+```kotlin
+@CacheEvict(cacheNames = ["players"], key = "'player:' + #id")
+@Transactional
+fun update(id: Long, request: UpdatePlayerRequest): PlayerDto { ... }
+```
+
+4. **For complex invalidation, use `@Caching`**:
+
+```kotlin
+@Caching(
+    evict = [
+        CacheEvict(cacheNames = ["players"], key = "'player:' + #id"),
+        CacheEvict(cacheNames = ["playerList"], allEntries = true)
+    ]
+)
+fun delete(id: Long) { ... }
+```
+
+---
+
+## Build & Verification Workflow
+
+### Pre-Commit Checklist
+
+```bash
+# 1. Run full build with tests
+cd casino-b
+./gradlew clean build
+
+# 2. Check for compilation errors
+./gradlew compileKotlin
+
+# 3. Run specific tests
+./gradlew test --tests "*PlayerServiceTest"
+
+# 4. Generate test coverage report
+./gradlew jacocoTestReport
+```
+
+### WARNING: Skipping Build Verification
 
 **The Problem:**
 
-```kotlin
-// BAD - Secrets in code
-@Configuration
-class PaymentConfig {
-    val apiKey = "sk_live_abc123xyz"  // Committed to git!
-}
-```
+Pushing code without running `./gradlew clean build`.
+
+**Why This Breaks:**
+1. CI/CD pipeline fails
+2. Integration tests may catch issues too late
+3. Other developers pull broken code
 
 **The Fix:**
 
-```kotlin
-// GOOD - Environment variables
-@Configuration
-class PaymentConfig(
-    @Value("\${payment.api-key}") 
-    private val apiKey: String
-)
+ALWAYS run before committing:
+```bash
+./gradlew clean build && echo "Build passed!"
 ```
 
 ---
 
-## Debugging Common Issues
+## Database Migration Workflow
 
-### 401 Unauthorized
+See the **postgresql** skill for Flyway migration patterns.
 
-1. Check JWT token format: `Authorization: Bearer <token>`
-2. Verify JWT secret is 64+ characters for HS512
-3. Check token expiration
+### Quick Migration Steps
 
-### N+1 Query Problems
+1. Create migration file: `V{yyyyMMddHHmmss}__{description}.sql`
+2. Place in `src/main/resources/db/migration/`
+3. Run: `./gradlew flywayMigrate`
+
+**Critical Rules:**
+- ALWAYS use `BIGSERIAL` for IDs
+- ALWAYS use `TIMESTAMP WITH TIME ZONE` for dates
+- NEVER use `SERIAL` (32-bit overflow risk)
+
+---
+
+## Async Processing Workflow
+
+### Background Task with Named Executor
 
 ```kotlin
-// BAD - N+1 queries
-@Transactional(readOnly = true)
-fun getPlayersWithWallets(): List<PlayerDto> {
-    return playerRepository.findAll() // 1 query
-        .map { 
-            val wallet = it.wallet // N queries!
-            PlayerDto(it, wallet)
-        }
+@Service
+class NotificationService(
+    @Qualifier("websocketNotificationExecutor")
+    private val executor: Executor
+) {
+    fun sendNotificationAsync(playerId: Long, message: String) {
+        CompletableFuture.runAsync({
+            // Send notification
+        }, executor)
+    }
 }
-
-// GOOD - Single query with JOIN FETCH
-@Query("SELECT p FROM Player p LEFT JOIN FETCH p.wallet")
-fun findAllWithWallets(): List<Player>
 ```
 
-### Cache Not Working
+### Executor Selection Guide
 
-1. Ensure `@EnableCaching` is present
-2. Check cache name matches configuration
-3. Verify cache key is correct type (Long vs String)
+| Executor | Use Case | Rejection Policy |
+|----------|----------|------------------|
+| `walletAsyncExecutor` | Financial operations | CallerRunsPolicy (never drop) |
+| `websocketNotificationExecutor` | Real-time UI updates | DiscardOldestPolicy (drop stale) |
+| `taskExecutor` | General background work | CallerRunsPolicy |
 
-See the **postgresql** skill for migration patterns.
-See the **redis** skill for cache configuration.
+---
+
+## Related Skills
+
+- See the **jpa** skill for entity and repository patterns
+- See the **kafka** skill for async event publishing
+- See the **redis** skill for distributed caching configuration

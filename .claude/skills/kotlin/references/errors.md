@@ -1,79 +1,42 @@
-```markdown
-# Kotlin Errors Reference
+# Kotlin Error Handling
 
-Exception handling, validation, and error patterns in the casino-b/ codebase.
+Exception handling patterns for the casino backend.
 
-## Custom Exception Hierarchy
+## Custom Exceptions
 
-### Base Exception Pattern
+### Domain-Specific Exceptions
 
 ```kotlin
-@ResponseStatus(HttpStatus.NOT_FOUND)
-class NotFoundException(message: String) : RuntimeException(message)
+// GOOD - meaningful exception hierarchy
+sealed class CasinoException(message: String) : RuntimeException(message)
 
-@ResponseStatus(HttpStatus.BAD_REQUEST)
-class BadRequestException(message: String) : RuntimeException(message)
+class PlayerNotFoundException(playerId: Long) :
+    CasinoException("Player not found: $playerId")
 
-@ResponseStatus(HttpStatus.CONFLICT)
-class ConflictException(message: String) : RuntimeException(message)
+class InsufficientBalanceException(
+    val available: BigDecimal,
+    val required: BigDecimal
+) : CasinoException("Insufficient balance: available=$available, required=$required")
 
-@ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
-class LimitExceededException(
-    message: String,
-    val limitDetails: Map<String, Any?> = emptyMap()
-) : RuntimeException(message)
+class BonusNotEligibleException(reason: String) :
+    CasinoException("Player not eligible for bonus: $reason")
 ```
 
-### Exception with Context
+### Exception with Error Codes
 
 ```kotlin
-class PaymentFailedException(
-    message: String,
-    val paymentId: String,
-    val errorCode: String,
-    cause: Throwable? = null
-) : RuntimeException(message, cause)
-
-// Usage
-throw PaymentFailedException(
-    message = "Payment processing failed",
-    paymentId = payment.id,
-    errorCode = "GATEWAY_TIMEOUT",
-    cause = e
-)
-```
-
-## Global Exception Handler
-
-```kotlin
-@RestControllerAdvice
-class GlobalExceptionHandler {
-    private val logger = LoggerFactory.getLogger(javaClass)
-
-    @ExceptionHandler(NotFoundException::class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    fun handleNotFound(ex: NotFoundException): ErrorResponse {
-        return ErrorResponse(
-            status = "ERROR",
-            code = "NOT_FOUND",
-            message = ex.message ?: "Resource not found"
-        )
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException::class)
-    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
-    fun handleValidation(ex: MethodArgumentNotValidException): ErrorResponse {
-        val errors = ex.bindingResult.fieldErrors.associate { 
-            it.field to (it.defaultMessage ?: "Invalid")
-        }
-        return ErrorResponse(
-            status = "ERROR",
-            code = "VALIDATION_FAILED",
-            message = "Validation failed",
-            details = mapOf("fields" to errors)
-        )
-    }
+enum class ErrorCode(val httpStatus: Int) {
+    PLAYER_NOT_FOUND(404),
+    INSUFFICIENT_BALANCE(400),
+    BONUS_EXPIRED(400),
+    VALIDATION_FAILED(422),
+    INTERNAL_ERROR(500)
 }
+
+class ApiException(
+    val code: ErrorCode,
+    override val message: String
+) : RuntimeException(message)
 ```
 
 ## WARNING: Silent Exception Swallowing
@@ -81,210 +44,199 @@ class GlobalExceptionHandler {
 **The Problem:**
 
 ```kotlin
-// BAD - Catches exception, does nothing
-fun processPayment(payment: Payment): Boolean {
+// BAD - exception silently ignored
+fun processPayment(request: PaymentRequest): PaymentResult {
     try {
-        gateway.process(payment)
-        return true
+        return paymentGateway.process(request)
     } catch (e: Exception) {
-        return false  // Silent failure - what went wrong?
+        return PaymentResult.failure() // No logging, no context
     }
 }
 ```
 
 **Why This Breaks:**
-1. Debugging nightmare - no trace of what failed
-2. Masks configuration errors, network issues, bugs
-3. Impossible to monitor in production
-4. Cannot trigger alerts or retries
+1. No audit trail when issues occur
+2. Debugging is impossible—failure cause unknown
+3. May hide critical errors (database down, network issues)
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Log, then handle appropriately
-fun processPayment(payment: Payment): PaymentResult {
+// GOOD - log with context, rethrow or handle explicitly
+fun processPayment(request: PaymentRequest): PaymentResult {
     return try {
-        gateway.process(payment)
-        PaymentResult.Success(payment.id)
+        paymentGateway.process(request)
     } catch (e: PaymentGatewayException) {
-        logger.error("Payment failed: ${payment.id}", e)
-        PaymentResult.Failed(e.errorCode, e.message ?: "Unknown error")
+        logger.error("Payment failed for player ${request.playerId}: ${e.message}", e)
+        PaymentResult.failure(e.errorCode, e.message)
     } catch (e: Exception) {
-        logger.error("Unexpected error processing payment: ${payment.id}", e)
-        throw PaymentProcessingException("Failed to process payment", e)
+        logger.error("Unexpected error processing payment: ${request.playerId}", e)
+        throw PaymentProcessingException("Payment failed unexpectedly", e)
     }
 }
 ```
 
-## Validation Patterns
-
-### Jakarta Bean Validation
-
-```kotlin
-data class CreatePlayerRequest(
-    @field:NotBlank(message = "Username is required")
-    @field:Size(min = 3, max = 50, message = "Username must be 3-50 characters")
-    val username: String,
-    
-    @field:NotBlank(message = "Email is required")
-    @field:Email(message = "Invalid email format")
-    val email: String,
-    
-    @field:NotBlank(message = "Password is required")
-    @field:Size(min = 8, max = 100, message = "Password must be 8-100 characters")
-    val password: String
-)
-```
-
-### Programmatic Validation with require/check
-
-```kotlin
-fun updateThreshold(value: Double, updatedBy: String) {
-    require(value in 0.0..1.0) { 
-        "Threshold must be between 0 and 1, got: $value" 
-    }
-    require(updatedBy.isNotBlank()) { 
-        "Updater must not be blank" 
-    }
-    // proceed
-}
-
-fun withdraw(amount: BigDecimal) {
-    check(status == AccountStatus.ACTIVE) { 
-        "Cannot withdraw from ${status} account" 
-    }
-    check(balance >= amount) { 
-        "Insufficient balance: $balance < $amount" 
-    }
-    // proceed
-}
-```
-
-## WARNING: Using Exceptions for Flow Control
+## WARNING: Catching Generic Exception
 
 **The Problem:**
 
 ```kotlin
-// BAD - Exceptions for expected cases
-fun findPlayer(id: Long): Player? {
-    return try {
-        playerRepository.getById(id)  // throws if not found
-    } catch (e: EntityNotFoundException) {
-        null
-    }
+// BAD - catches everything including system errors
+try {
+    processTransaction()
+} catch (e: Exception) {
+    handleError(e)
 }
 ```
 
 **Why This Breaks:**
-1. Exceptions are expensive - stack trace creation
-2. Makes debugging harder (noise in logs)
-3. Control flow is obscured
-4. Performance impact in hot paths
+1. Catches `OutOfMemoryError`, `InterruptedException`
+2. May swallow errors that should crash the application
+3. No differentiation between recoverable and fatal errors
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Use Optional or nullable return
-fun findPlayer(id: Long): Player? {
-    return playerRepository.findById(id).orElse(null)
-}
-
-// GOOD - Use sealed class for expected outcomes
-sealed class FindResult<out T> {
-    data class Found<T>(val value: T) : FindResult<T>()
-    object NotFound : FindResult<Nothing>()
+// GOOD - catch specific exceptions
+try {
+    processTransaction()
+} catch (e: InsufficientBalanceException) {
+    return TransactionResult.insufficientFunds(e.available)
+} catch (e: PlayerNotFoundException) {
+    return TransactionResult.playerNotFound()
+} catch (e: DatabaseException) {
+    logger.error("Database error during transaction", e)
+    throw ServiceUnavailableException("Please try again later")
 }
 ```
 
-## Kafka Event Error Handling
+## Result Pattern
 
-### Fire-and-Forget Pattern
+### Using Kotlin Result
 
 ```kotlin
-fun publishPlayerRegistered(player: Player) {
+// GOOD - explicit success/failure without exceptions
+fun validatePlayer(playerId: Long): Result<Player> {
+    val player = playerRepository.findById(playerId).orElse(null)
+        ?: return Result.failure(PlayerNotFoundException(playerId))
+
+    if (player.status == PlayerStatus.BLOCKED) {
+        return Result.failure(PlayerBlockedException(playerId))
+    }
+
+    return Result.success(player)
+}
+
+// Usage
+validatePlayer(playerId)
+    .onSuccess { player -> processBonus(player) }
+    .onFailure { error -> logger.warn("Validation failed: ${error.message}") }
+```
+
+### Sealed Class for Detailed Results
+
+```kotlin
+sealed class WithdrawalResult {
+    data class Success(val transactionId: String) : WithdrawalResult()
+    data class InsufficientFunds(val available: BigDecimal) : WithdrawalResult()
+    data class PlayerBlocked(val reason: String) : WithdrawalResult()
+    data class LimitExceeded(val dailyLimit: BigDecimal) : WithdrawalResult()
+}
+
+fun processWithdrawal(request: WithdrawalRequest): WithdrawalResult {
+    val player = playerRepository.findById(request.playerId)
+        ?: return WithdrawalResult.PlayerBlocked("Player not found")
+
+    val wallet = walletRepository.findByPlayerId(request.playerId)
+    if (wallet.balance < request.amount) {
+        return WithdrawalResult.InsufficientFunds(wallet.balance)
+    }
+
+    // Process...
+    return WithdrawalResult.Success(transactionId)
+}
+```
+
+## Exception in Kafka Events
+
+### WARNING: Throwing in Event Publishers
+
+**The Problem:**
+
+```kotlin
+// BAD - exception breaks main transaction
+fun createPlayer(request: CreatePlayerRequest): Player {
+    val player = playerRepository.save(Player(username = request.username))
+    eventPublisher.publish(PlayerCreatedEvent(player)) // May throw
+    return player // Never reached if publish fails
+}
+```
+
+**Why This Breaks:**
+1. Player created but not returned—inconsistent state
+2. Event publishing is secondary to main operation
+3. Kafka unavailability shouldn't break player creation
+
+**The Fix:**
+
+```kotlin
+// GOOD - fire-and-forget with logging
+fun createPlayer(request: CreatePlayerRequest): Player {
+    val player = playerRepository.save(Player(username = request.username))
     try {
-        val event = PlayerRegisteredEvent(
-            eventId = EventBuilder.generateEventId(),
-            eventTimestamp = EventBuilder.getCurrentTimestamp(),
-            payload = PlayerRegisteredPayload(player.username, player.email)
+        eventPublisher.publish(PlayerCreatedEvent(player))
+    } catch (e: Exception) {
+        logger.error("Failed to publish player created event: ${player.id}", e)
+        // Event will be retried via FailedKafkaEvent mechanism
+    }
+    return player
+}
+```
+
+See the **kafka** skill for event publishing patterns.
+
+## Global Exception Handler
+
+```kotlin
+@RestControllerAdvice
+class GlobalExceptionHandler {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(PlayerNotFoundException::class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    fun handlePlayerNotFound(e: PlayerNotFoundException): ErrorResponse {
+        return ErrorResponse(
+            status = "ERROR",
+            code = "PLAYER_NOT_FOUND",
+            message = e.message ?: "Player not found"
         )
-        eventPublisher.publish(KafkaTopics.PLAYER_REGISTERED, player.id.toString(), event)
-        logger.info("Published player registered event: ${player.id}")
-    } catch (e: Exception) {
-        logger.error("Failed to publish event for player: ${player.id}", e)
-        // DON'T throw - event publishing should not break main flow
-        // Events go to failed_kafka_events table for retry
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException::class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+    fun handleValidation(e: MethodArgumentNotValidException): ErrorResponse {
+        val errors = e.bindingResult.fieldErrors
+            .associate { it.field to (it.defaultMessage ?: "Invalid") }
+        return ErrorResponse(
+            status = "ERROR",
+            code = "VALIDATION_FAILED",
+            message = "Validation failed",
+            details = mapOf("fields" to errors)
+        )
+    }
+
+    @ExceptionHandler(Exception::class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    fun handleUnexpected(e: Exception): ErrorResponse {
+        logger.error("Unexpected error", e)
+        return ErrorResponse(
+            status = "ERROR",
+            code = "INTERNAL_ERROR",
+            message = "An unexpected error occurred"
+        )
     }
 }
 ```
 
-## WARNING: Throwing in Kafka Publishers
-
-**The Problem:**
-
-```kotlin
-// BAD - Exception breaks registration
-@Transactional
-fun registerPlayer(request: RegisterRequest): Player {
-    val player = playerRepository.save(Player(...))
-    eventPublisher.publish(event)  // Throws on Kafka failure
-    return player  // Never reached if Kafka is down
-}
-```
-
-**Why This Breaks:**
-1. Player registration fails when Kafka has transient issues
-2. Transaction rolls back - user cannot register
-3. Couples core business to messaging infrastructure
-4. Single point of failure
-
-**The Fix:**
-
-```kotlin
-// GOOD - Async publishing with fallback
-@Transactional
-fun registerPlayer(request: RegisterRequest): Player {
-    val player = playerRepository.save(Player(...))
-    
-    try {
-        asyncEventPublisher.publishAsync(event)
-    } catch (e: Exception) {
-        logger.error("Event publish failed, saving for retry: ${player.id}", e)
-        failedEventRepository.save(FailedKafkaEvent(event, e.message))
-    }
-    
-    return player  // Always returns - registration succeeds
-}
-```
-
-## Error Response Format
-
-```kotlin
-data class ErrorResponse(
-    val status: String = "ERROR",
-    val code: String,
-    val message: String,
-    val timestamp: Instant = Instant.now(),
-    val details: Map<String, Any?>? = null
-)
-
-// Example response:
-// {
-//   "status": "ERROR",
-//   "code": "VALIDATION_FAILED",
-//   "message": "Validation failed",
-//   "timestamp": "2024-01-15T10:30:00Z",
-//   "details": {
-//     "fields": { "email": "Invalid email format" }
-//   }
-// }
-```
-
-## Related Skills
-
-- See the **spring-boot** skill for @ControllerAdvice patterns
-- See the **kafka** skill for event retry mechanisms
-- See the **jpa** skill for repository exception handling
-```
-
-I've generated all the Kotlin skill files. Would you like me to create the directory structure and write these files once you grant permission?
+See the **spring-boot** skill for controller advice patterns.

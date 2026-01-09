@@ -1,279 +1,225 @@
 # Playwright Workflows
 
-Common testing workflows for the casino customer frontend.
+## Test Organization
 
-## Test File Organization
+Structure tests by user journey for the customer frontend:
 
 ```
 casino-customer-f/
-├── e2e/
-│   ├── auth.spec.ts              # Authentication flows
-│   ├── games-listing.spec.ts     # Games page tests
-│   ├── test-profile.spec.ts      # Profile management
-│   ├── test-kyc-dashboard.spec.ts # KYC verification
-│   └── test-persistent-login.spec.ts # Session management
+├── tests/
+│   ├── auth/
+│   │   ├── login.spec.ts
+│   │   ├── registration.spec.ts
+│   │   └── password-reset.spec.ts
+│   ├── games/
+│   │   ├── lobby.spec.ts
+│   │   ├── game-session.spec.ts
+│   │   └── search-filters.spec.ts
+│   ├── wallet/
+│   │   ├── deposit.spec.ts
+│   │   └── withdrawal.spec.ts
+│   ├── kyc/
+│   │   └── document-upload.spec.ts
+│   ├── pages/              # Page Object Models
+│   │   ├── login.page.ts
+│   │   ├── games.page.ts
+│   │   └── wallet.page.ts
+│   └── fixtures/
+│       └── auth.fixture.ts
 ├── playwright.config.ts
 └── package.json
 ```
 
-## Authentication Test Workflow
+---
 
-### Complete Login Flow
+## Authentication Fixture
 
-```typescript
-test.describe('Authentication Flow', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:4201');
-  });
-
-  test('should login and verify session', async ({ page }) => {
-    // Open modal
-    await page.getByRole('button', { name: 'Login' }).first().click();
-    await expect(page.locator('.auth-modal-backdrop')).toBeVisible();
-    
-    // Fill credentials
-    await page.locator('input[formControlName="username"]').fill('testplayer');
-    await page.locator('input[formControlName="password"]').fill('Test1234');
-    await page.locator('button[type="submit"]').click();
-    
-    // Verify logged in state
-    await expect(page.locator('.auth-modal-backdrop')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.user-balance-section')).toBeVisible();
-    await expect(page.locator('.user-menu-toggle .username')).toContainText('testplayer');
-  });
-});
-```
-
-### Persistent Login Testing
+Reuse authenticated state across tests:
 
 ```typescript
-test('should maintain session after reload', async ({ page }) => {
-  // Login
-  await loginUser(page, 'testplayer', 'Test1234');
-  
-  // Verify logged in
-  await expect(page.locator('.user-balance-section')).toBeVisible();
-  
-  // Reload and verify session persists
-  await page.reload();
-  await page.waitForTimeout(2000);
-  
-  await expect(page.locator('.user-balance-section')).toBeVisible();
-  await expect(page.locator('.user-menu-toggle .username')).toBeVisible();
-});
-```
+// tests/fixtures/auth.fixture.ts
+import { test as base } from '@playwright/test';
+import { LoginPage } from '../pages/login.page';
 
-## WARNING: Sharing State Between Tests
+type AuthFixtures = {
+  authenticatedPage: Page;
+};
 
-**The Problem:**
-
-```typescript
-// BAD - Tests depend on execution order
-let authToken: string;
-
-test('should login', async ({ page }) => {
-  // Login and save token
-  authToken = await page.evaluate(() => localStorage.getItem('accessToken'));
-});
-
-test('should use token', async ({ page }) => {
-  // Fails if first test didn't run
-  await page.evaluate(t => localStorage.setItem('accessToken', t), authToken);
-});
-```
-
-**Why This Breaks:**
-1. Tests must run in specific order
-2. Parallel execution impossible
-3. Single test failure cascades
-
-**The Fix:**
-
-```typescript
-// GOOD - Each test is independent
-test.describe.serial('Sequential tests', () => {
-  let authToken: string;
-  
-  test.beforeAll(async ({ page }) => {
-    // Setup shared state in beforeAll
-    await loginAndGetToken(page);
-  });
-});
-
-// Or use test fixtures
-test('should access protected route', async ({ page }) => {
-  await page.goto('http://localhost:4201');
-  await page.evaluate(({ token }) => {
-    localStorage.setItem('accessToken', token);
-  }, { token: 'valid-jwt-token' });
-  
-  await page.goto('http://localhost:4201/account/profile');
-});
-```
-
-## API Testing Workflow
-
-```typescript
-test.describe('Games API Tests', () => {
-  test('should fetch games from public API', async ({ request }) => {
-    const response = await request.get('http://localhost:8080/api/public/games');
-    
-    expect(response.ok()).toBeTruthy();
-    
-    const data = await response.json();
-    expect(data).toHaveProperty('games');
-    expect(data).toHaveProperty('total');
-    expect(Array.isArray(data.games)).toBeTruthy();
-  });
-
-  test('should filter games by category', async ({ request }) => {
-    const response = await request.get('http://localhost:8080/api/public/games?type=SLOTS');
-    
-    expect(response.ok()).toBeTruthy();
-    const data = await response.json();
-    expect(data).toHaveProperty('games');
-  });
-});
-```
-
-## Multi-Step Form Testing (Registration)
-
-```typescript
-test('should complete multi-step registration', async ({ page }) => {
-  await page.getByRole('button', { name: 'Register' }).first().click();
-  await page.waitForSelector('.step-title');
-  
-  // Step 1: Account Information
-  await expect(page.locator('.step-title')).toContainText('Account Information');
-  await page.locator('input#field-1').fill('testuser123');
-  await page.locator('input#field-2').fill('test@example.com');
-  await page.locator('input#field-3').fill('TestPassword123!');
-  await page.locator('input#field-4').fill('TestPassword123!');
-  await page.getByRole('button', { name: 'Next' }).click();
-  
-  // Step 2: Personal Information
-  await expect(page.locator('.step-title')).toContainText('Personal Information');
-  await page.locator('input#field-5').fill('1990-01-01');
-  await page.getByRole('button', { name: 'Next' }).click();
-  
-  // Step 3: Terms
-  await expect(page.locator('.step-title')).toContainText('Terms & Conditions');
-  await page.locator('input#field-6').check();
-  
-  await expect(page.getByRole('button', { name: 'Create Account' })).toBeVisible();
-});
-```
-
-## Network Request Monitoring
-
-```typescript
-test.describe.serial('Admin Bonus Creation', () => {
-  let bonusCreationResponse: any = null;
-
-  test.beforeAll(async ({ browser }) => {
-    const page = await browser.newPage();
-    
-    // Monitor API responses
-    page.on('response', async (response) => {
-      if (response.url().includes('/api/') && response.url().includes('/bonus')) {
-        bonusCreationResponse = {
-          status: response.status(),
-          body: await response.json().catch(() => null)
-        };
-      }
-    });
-    
-    // Monitor failures
-    page.on('requestfailed', (request) => {
-      console.log(`Request failed: ${request.url()}`);
-    });
-  });
-});
-```
-
-## Screenshot Workflow
-
-```typescript
-test('should capture KYC dashboard', async ({ page }) => {
-  await page.goto('http://localhost:4201/kyc');
-  
-  // Full page screenshot
-  await page.screenshot({ path: 'kyc-dashboard.png', fullPage: true });
-  
-  // Element screenshot
-  const progressSection = page.locator('.progress-section');
-  await progressSection.screenshot({ path: 'kyc-progress.png' });
-});
-```
-
-## WARNING: Not Using baseURL
-
-**The Problem:**
-
-```typescript
-// BAD - Hardcoded URLs everywhere
-test('test 1', async ({ page }) => {
-  await page.goto('http://localhost:4201/games');
-});
-
-test('test 2', async ({ page }) => {
-  await page.goto('http://localhost:4201/profile');
-});
-```
-
-**The Fix:**
-
-```typescript
-// playwright.config.ts
-export default defineConfig({
-  use: {
-    baseURL: 'http://localhost:4201',
+export const test = base.extend<AuthFixtures>({
+  authenticatedPage: async ({ page }, use) => {
+    const loginPage = new LoginPage(page);
+    await loginPage.goto();
+    await loginPage.login(
+      process.env.TEST_USER_EMAIL!,
+      process.env.TEST_USER_PASSWORD!
+    );
+    await page.waitForURL('/dashboard');
+    await use(page);
   },
 });
+```
 
-// In tests - use relative URLs
-test('test 1', async ({ page }) => {
-  await page.goto('/games');
+### Using the Fixture
+
+```typescript
+// tests/wallet/deposit.spec.ts
+import { test } from '../fixtures/auth.fixture';
+import { expect } from '@playwright/test';
+
+test('authenticated user can access deposit page', async ({ authenticatedPage }) => {
+  await authenticatedPage.goto('/wallet/deposit');
+  await expect(authenticatedPage.getByRole('heading', { name: 'Deposit' })).toBeVisible();
 });
 ```
 
-## Configuration Reference
+---
+
+## CI/CD Integration
+
+### Playwright Configuration for CI
 
 ```typescript
 // playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './tests',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: process.env.CI ? 'github' : 'html',
   
   use: {
-    baseURL: 'http://localhost:4201',
+    baseURL: process.env.BASE_URL || 'http://localhost:4201',
     trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
   },
-  
+
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-    { name: 'Mobile Chrome', use: { ...devices['Pixel 5'] } },
-    { name: 'Mobile Safari', use: { ...devices['iPhone 12'] } },
-  ],
-  
-  webServer: [
     {
-      command: 'npm run start -- --port 4201',
-      url: 'http://localhost:4201',
-      reuseExistingServer: !process.env.CI,
-      timeout: 120 * 1000,
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
     },
-    {
-      command: 'cd ../casino-b && ./gradlew bootRun',
-      url: 'http://localhost:8080',
-      reuseExistingServer: !process.env.CI,
-    }
   ],
+
+  webServer: process.env.CI ? undefined : {
+    command: 'ng serve',
+    url: 'http://localhost:4201',
+    reuseExistingServer: !process.env.CI,
+  },
 });
+```
+
+---
+
+## Debugging Workflow
+
+### Interactive Debugging
+
+```bash
+# Run with UI for step-by-step debugging
+npm run e2e:ui
+
+# Run specific test in debug mode
+npx playwright test tests/auth/login.spec.ts --debug
+
+# Generate trace for failed test analysis
+npx playwright test --trace on
+```
+
+### Trace Viewer
+
+```bash
+# View trace file after failure
+npx playwright show-trace test-results/auth-login-chromium/trace.zip
+```
+
+---
+
+## WARNING: Testing Implementation Details
+
+**The Problem:**
+
+```typescript
+// BAD - Testing Angular internals
+test('component state updates', async ({ page }) => {
+  await page.goto('/games');
+  // Checking internal component properties
+  const componentState = await page.evaluate(() => {
+    return (window as any).ng.getComponent(
+      document.querySelector('app-game-list')
+    ).games.length;
+  });
+  expect(componentState).toBe(10);
+});
+```
+
+**Why This Breaks:**
+1. Tightly coupled to Angular implementation
+2. Breaks when component internals change
+3. Not testing actual user experience
+
+**The Fix:**
+
+```typescript
+// GOOD - Test user-visible behavior
+test('game list displays games', async ({ page }) => {
+  await page.goto('/games');
+  await expect(page.getByTestId('game-card')).toHaveCount(10);
+});
+```
+
+---
+
+## Multi-Language Testing
+
+Test localized content for i18n support:
+
+```typescript
+// tests/i18n/locale-switching.spec.ts
+import { test, expect } from '@playwright/test';
+
+const locales = ['en', 'de', 'fr', 'es'];
+
+for (const locale of locales) {
+  test(`displays correct content for ${locale}`, async ({ page }) => {
+    await page.goto(`/${locale}/games`);
+    
+    // Verify locale-specific content renders
+    await expect(page.locator('html')).toHaveAttribute('lang', locale);
+    await expect(page.getByRole('navigation')).toBeVisible();
+  });
+}
+```
+
+---
+
+## Visual Regression Testing
+
+Catch unintended UI changes:
+
+```typescript
+test('game lobby matches snapshot', async ({ page }) => {
+  await page.goto('/games');
+  await page.waitForLoadState('networkidle');
+  
+  // Full page screenshot
+  await expect(page).toHaveScreenshot('game-lobby.png', {
+    maxDiffPixels: 100,
+  });
+});
+
+test('deposit form matches snapshot', async ({ page }) => {
+  await page.goto('/wallet/deposit');
+  
+  // Component screenshot
+  await expect(page.getByTestId('deposit-form')).toHaveScreenshot('deposit-form.png');
+});
+```
+
+Update snapshots when intentional changes occur:
+
+```bash
+npx playwright test --update-snapshots
 ```

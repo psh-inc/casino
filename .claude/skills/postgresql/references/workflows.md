@@ -2,235 +2,271 @@
 
 ## Migration Workflow
 
-### Step 1: Create Migration File
+### Creating Migrations
+
+**Naming Convention:** `V{yyyyMMddHHmmss}__{description}.sql`
 
 ```bash
-# Naming: V{YYYYMMddHHmmss}__{description}.sql
-touch casino-b/src/main/resources/db/migration/V20250106150000__add_player_vip_status.sql
+# Generate timestamp in UTC
+date -u +"%Y%m%d%H%M%S"
+# Output: 20260110143022
+
+# Create migration file
+touch casino-b/src/main/resources/db/migration/V20260110143022__add_player_loyalty_tier.sql
 ```
 
-### Step 2: Write Idempotent DDL
+### Migration Best Practices
 
 ```sql
--- Use IF NOT EXISTS / IF EXISTS for safety
-ALTER TABLE players ADD COLUMN IF NOT EXISTS vip_level VARCHAR(20);
+-- V20260110143022__add_player_loyalty_tier.sql
 
-CREATE INDEX IF NOT EXISTS idx_players_vip_level ON players(vip_level);
+-- 1. Always use IF NOT EXISTS for safety
+CREATE TABLE IF NOT EXISTS player_loyalty_tiers (
+    id BIGSERIAL PRIMARY KEY,
+    player_id BIGINT NOT NULL REFERENCES players(id),
+    tier VARCHAR(20) NOT NULL DEFAULT 'BRONZE',
+    points NUMERIC(15,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
 
--- For drops, check existence
-DROP INDEX IF EXISTS idx_players_old_status;
+-- 2. Create indices with IF NOT EXISTS
+CREATE INDEX IF NOT EXISTS idx_loyalty_player_id 
+ON player_loyalty_tiers(player_id);
+
+-- 3. Use separate statements for ALTER operations
+ALTER TABLE player_loyalty_tiers 
+ADD CONSTRAINT chk_tier_values 
+CHECK (tier IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND'));
 ```
 
-### Step 3: Run Migration
-
-```bash
-./gradlew flywayMigrate
-# Or automatically on bootRun with flyway.enabled=true
-```
-
-### WARNING: Modifying Existing Migrations
+### WARNING: Destructive Migrations Without Backup Plan
 
 **The Problem:**
 
 ```sql
--- BAD - Editing V1__initial_schema.sql after it ran
--- Changes checksum, breaks Flyway validation
+-- BAD - irreversible data loss
+ALTER TABLE players DROP COLUMN legacy_field;
+DROP TABLE old_transactions;
 ```
 
 **Why This Breaks:**
-1. Flyway checksums each migration file
-2. Production database has original checksum stored
-3. Mismatch = deployment failure
+1. No rollback if deployment fails
+2. Lost data cannot be recovered
+3. Compliance violations for financial data
 
 **The Fix:**
 
 ```sql
--- GOOD - Create new migration for changes
--- V20250106160000__fix_player_column.sql
-ALTER TABLE players ALTER COLUMN email TYPE VARCHAR(255);
+-- GOOD - rename first, drop in later migration
+ALTER TABLE players RENAME COLUMN legacy_field TO _legacy_field_deprecated;
+-- Then in V202601151200__cleanup_deprecated.sql (after verification):
+-- ALTER TABLE players DROP COLUMN _legacy_field_deprecated;
 ```
 
----
+### Running Migrations
 
-## Entity-First vs Migration-First
+```bash
+# Via Gradle
+cd casino-b
+./gradlew flywayMigrate
 
-### Migration-First (Recommended)
+# Via application startup (automatic)
+./gradlew bootRun
+
+# Check migration status
+./gradlew flywayInfo
+```
+
+## Entity Mapping Workflow
+
+### 1. Design Table First
 
 ```sql
--- 1. Write migration
-ALTER TABLE players ADD COLUMN phone_verified BOOLEAN DEFAULT FALSE;
+CREATE TABLE bonus_claims (
+    id BIGSERIAL PRIMARY KEY,
+    player_id BIGINT NOT NULL REFERENCES players(id),
+    bonus_id BIGINT NOT NULL REFERENCES bonuses(id),
+    amount_credited NUMERIC(19,4) NOT NULL,
+    wagering_required NUMERIC(19,4) NOT NULL,
+    wagering_completed NUMERIC(19,4) NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    claimed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    forfeited_at TIMESTAMP WITH TIME ZONE
+);
 ```
 
-```kotlin
-// 2. Update entity to match
-@Column(name = "phone_verified")
-var phoneVerified: Boolean = false
-```
-
-### Entity-First (Development Only)
-
-```yaml
-# application.yml - NEVER in production
-spring:
-  jpa:
-    hibernate:
-      ddl-auto: update  # Creates missing columns
-```
-
----
-
-## Query Optimization Workflow
-
-### Step 1: Identify Slow Query
-
-```kotlin
-// Enable SQL logging in application.yml
-logging:
-  level:
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql: TRACE
-```
-
-### Step 2: Analyze with EXPLAIN
-
-```sql
-EXPLAIN ANALYZE
-SELECT * FROM transactions 
-WHERE wallet_id = 123 AND created_at > '2025-01-01'
-ORDER BY created_at DESC LIMIT 20;
-```
-
-### Step 3: Add Appropriate Index
-
-```sql
--- Based on EXPLAIN output
-CREATE INDEX CONCURRENTLY idx_transactions_wallet_created
-ON transactions(wallet_id, created_at DESC);
-```
-
-**Note:** `CONCURRENTLY` avoids table locks in production.
-
----
-
-## Locking Strategies
-
-### Optimistic Locking (Default)
+### 2. Create Entity
 
 ```kotlin
 @Entity
-data class Wallet(
-    @Version
-    var version: Long = 0,
+@Table(name = "bonus_claims")
+data class BonusClaim(
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long? = null,
     
-    var balance: BigDecimal = BigDecimal.ZERO
-)
-
-// Service catches OptimisticLockException and retries
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "player_id", nullable = false)
+    val player: Player,
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "bonus_id", nullable = false)
+    val bonus: Bonus,
+    
+    @Column(name = "amount_credited", nullable = false, precision = 19, scale = 4)
+    val amountCredited: BigDecimal,
+    
+    @Column(name = "wagering_required", nullable = false, precision = 19, scale = 4)
+    val wageringRequired: BigDecimal,
+    
+    @Column(name = "wagering_completed", nullable = false, precision = 19, scale = 4)
+    var wageringCompleted: BigDecimal = BigDecimal.ZERO,
+    
+    @Column(nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    var status: BonusClaimStatus = BonusClaimStatus.ACTIVE,
+    
+    @Column(name = "claimed_at", nullable = false)
+    val claimedAt: LocalDateTime = LocalDateTime.now(),
+    
+    @Column(name = "completed_at")
+    var completedAt: LocalDateTime? = null
+) {
+    // Required for JPA proxies
+    override fun hashCode(): Int = id?.hashCode() ?: 0
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BonusClaim) return false
+        return id != null && id == other.id
+    }
+}
 ```
 
-### Pessimistic Locking (High Contention)
+### 3. Create Repository
 
 ```kotlin
-@Lock(LockModeType.PESSIMISTIC_WRITE)
-@Query("SELECT w FROM Wallet w WHERE w.player.id = :playerId")
-fun findByPlayerIdWithLock(playerId: Long): Wallet?
+@Repository
+interface BonusClaimRepository : JpaRepository<BonusClaim, Long> {
+    
+    fun findByPlayerIdAndStatus(
+        playerId: Long, 
+        status: BonusClaimStatus
+    ): List<BonusClaim>
+    
+    @Query("""
+        SELECT bc FROM BonusClaim bc
+        LEFT JOIN FETCH bc.bonus
+        WHERE bc.player.id = :playerId
+        ORDER BY bc.claimedAt DESC
+    """)
+    fun findByPlayerIdWithBonus(
+        @Param("playerId") playerId: Long,
+        pageable: Pageable
+    ): Page<BonusClaim>
+}
 ```
 
-### Atomic Update (Best for Counters)
+## Testing Database Queries
+
+### Unit Testing Repositories
 
 ```kotlin
-@Modifying
-@Query("""
-    UPDATE Wallet w SET w.balance = w.balance + :amount
-    WHERE w.id = :walletId AND w.balance + :amount >= 0
-""")
-fun addBalance(walletId: Long, amount: BigDecimal): Int
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Testcontainers
+class BonusClaimRepositoryTest {
+    
+    companion object {
+        @Container
+        val postgres = PostgreSQLContainer<Nothing>("postgres:14").apply {
+            withDatabaseName("testdb")
+        }
+        
+        @JvmStatic
+        @DynamicPropertySource
+        fun properties(registry: DynamicPropertyRegistry) {
+            registry.add("spring.datasource.url", postgres::getJdbcUrl)
+            registry.add("spring.datasource.username", postgres::getUsername)
+            registry.add("spring.datasource.password", postgres::getPassword)
+        }
+    }
+    
+    @Autowired
+    lateinit var repository: BonusClaimRepository
+    
+    @Test
+    fun `should find active claims by player`() {
+        // Arrange - use TestEntityManager or fixtures
+        
+        // Act
+        val claims = repository.findByPlayerIdAndStatus(playerId, ACTIVE)
+        
+        // Assert
+        assertThat(claims).hasSize(2)
+    }
+}
 ```
 
----
+### Verifying Query Performance
 
-## Connection Pool Tuning
+```kotlin
+// Add to test to catch N+1 issues
+@Test
+fun `should load claims with single query`() {
+    // Enable query counting in test properties
+    val queryCount = DataSourceUtils.getQueryCount()
+    
+    val claims = repository.findByPlayerIdWithBonus(playerId, Pageable.unpaged())
+    claims.content.forEach { it.bonus.name }  // Access lazy field
+    
+    // Should be exactly 1 query due to JOIN FETCH
+    assertThat(DataSourceUtils.getQueryCount() - queryCount).isEqualTo(1)
+}
+```
 
-### HikariCP Configuration
+## Performance Troubleshooting
+
+### Analyze Slow Queries
+
+```sql
+-- Enable query logging temporarily
+SET log_statement = 'all';
+SET log_duration = on;
+
+-- Analyze specific query
+EXPLAIN ANALYZE 
+SELECT * FROM transactions 
+WHERE wallet_id = 123 
+AND created_at > NOW() - INTERVAL '30 days';
+```
+
+### Common Performance Fixes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Slow joins | Missing FK index | Add index on FK column |
+| Sequential scans | Missing composite index | Create covering index |
+| Lock waits | Long transactions | Reduce transaction scope |
+| Memory issues | Large result sets | Add pagination, use streaming |
+
+### Connection Pool Monitoring
 
 ```yaml
+# application.yml - HikariCP settings
 spring:
   datasource:
     hikari:
-      maximum-pool-size: 20        # Match CPU cores * 2-4
-      minimum-idle: 5
-      connection-timeout: 30000    # 30 seconds
-      idle-timeout: 600000         # 10 minutes
-      max-lifetime: 1800000        # 30 minutes
+      maximum-pool-size: 50
+      minimum-idle: 10
+      connection-timeout: 20000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000  # Warn if connection held > 1 min
 ```
 
-### WARNING: Pool Exhaustion
+## Related Skills
 
-**The Problem:**
-
-```kotlin
-// BAD - Long-running transaction holds connection
-@Transactional
-fun generateReport(): Report {
-    val data = repository.findAll()  // Quick
-    return pdfGenerator.create(data) // Slow, 30+ seconds
-}
-```
-
-**Why This Breaks:**
-1. Connection held during PDF generation
-2. Other requests queue waiting for connections
-3. Pool exhausted = application hangs
-
-**The Fix:**
-
-```kotlin
-// GOOD - Separate read from processing
-fun generateReport(): Report {
-    val data = fetchData()  // Short transaction
-    return pdfGenerator.create(data)  // No transaction
-}
-
-@Transactional(readOnly = true)
-fun fetchData(): List<ReportData> = repository.findAll()
-```
-
----
-
-## Bulk Operations
-
-### Batch Insert Pattern
-
-```kotlin
-@Modifying
-@Query(value = """
-    INSERT INTO transactions (wallet_id, amount, type, created_at)
-    SELECT unnest(:walletIds), unnest(:amounts), :type, NOW()
-""", nativeQuery = true)
-fun bulkInsert(walletIds: List<Long>, amounts: List<BigDecimal>, type: String)
-```
-
-### Batch Update Pattern
-
-```kotlin
-// Use JPA batch settings
-spring.jpa.properties.hibernate.jdbc.batch_size=50
-spring.jpa.properties.hibernate.order_inserts=true
-spring.jpa.properties.hibernate.order_updates=true
-```
-
----
-
-## Database Backup Verification
-
-```bash
-# Verify backup integrity
-pg_restore --list backup.dump | head -20
-
-# Test restore to scratch database
-createdb casino_test
-pg_restore -d casino_test backup.dump
-
-# Run smoke tests
-psql casino_test -c "SELECT COUNT(*) FROM players;"
-```
+- See the **jpa** skill for advanced entity relationships
+- See the **spring-boot** skill for `@Transactional` configuration

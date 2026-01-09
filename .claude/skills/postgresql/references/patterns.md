@@ -1,184 +1,231 @@
 # PostgreSQL Patterns Reference
 
-## Data Types
+## Schema Design Patterns
 
-### WARNING: Using SERIAL Instead of BIGSERIAL
+### Primary Keys: BIGSERIAL Only
 
-**The Problem:**
-
-```sql
--- BAD - SERIAL maxes out at 2.1 billion rows
-CREATE TABLE transactions (id SERIAL PRIMARY KEY);
-```
-
-**Why This Breaks:**
-1. SERIAL is 32-bit signed integer (max 2,147,483,647)
-2. High-volume tables (transactions, game rounds) easily exceed this
-3. Recovery requires schema migration with downtime
-
-**The Fix:**
+NEVER use `SERIAL`. The 32-bit limit (~2B) seems huge until you're migrating a production database.
 
 ```sql
--- GOOD - BIGSERIAL handles 9.2 quintillion rows
-CREATE TABLE transactions (id BIGSERIAL PRIMARY KEY);
-```
-
-**When You Might Be Tempted:**
-Copying schemas from tutorials or small-scale projects. Always use BIGSERIAL.
-
----
-
-### WARNING: TIMESTAMP Without Time Zone
-
-**The Problem:**
-
-```sql
--- BAD - Ambiguous timezone, causes bugs across regions
-CREATE TABLE events (occurred_at TIMESTAMP NOT NULL);
-```
-
-**Why This Breaks:**
-1. No timezone context stored—interpretation varies by client
-2. DST transitions cause duplicate or missing timestamps
-3. Distributed systems disagree on actual time
-
-**The Fix:**
-
-```sql
--- GOOD - Explicit UTC storage
-CREATE TABLE events (occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW());
-```
-
----
-
-### WARNING: Using FLOAT/DOUBLE for Money
-
-**The Problem:**
-
-```sql
--- BAD - Binary floating point loses precision
-CREATE TABLE wallets (balance FLOAT NOT NULL);
-```
-
-**Why This Breaks:**
-1. `0.1 + 0.2 = 0.30000000000000004` in binary floating point
-2. Rounding errors accumulate across transactions
-3. Financial audits fail with penny discrepancies
-
-**The Fix:**
-
-```sql
--- GOOD - Exact decimal arithmetic
-CREATE TABLE wallets (balance DECIMAL(19,4) NOT NULL DEFAULT 0);
-```
-
----
-
-## Index Patterns
-
-### Composite Index for Pagination
-
-```sql
--- Optimizes: WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
-CREATE INDEX idx_transactions_player_created 
-ON transactions(player_id, created_at DESC);
-```
-
-### Partial Index for Status Filtering
-
-```sql
--- Only indexes active records, smaller and faster
-CREATE INDEX idx_bonuses_active 
-ON bonuses(player_id) WHERE status = 'ACTIVE';
-```
-
-### Covering Index for Query Performance
-
-```sql
--- Includes columns to avoid table lookup
-CREATE INDEX idx_players_email_status 
-ON players(email) INCLUDE (status, created_at);
-```
-
----
-
-## Foreign Key Patterns
-
-### Standard Reference
-
-```sql
-CREATE TABLE wallets (
+-- GOOD - 64-bit, future-proof
+CREATE TABLE transactions (
     id BIGSERIAL PRIMARY KEY,
-    player_id BIGINT NOT NULL REFERENCES players(id),
-    CONSTRAINT fk_wallets_player FOREIGN KEY (player_id) REFERENCES players(id)
+    -- ...
+);
+
+-- BAD - 32-bit limit, migration nightmare
+CREATE TABLE transactions (
+    id SERIAL PRIMARY KEY,  -- DON'T
+    -- ...
 );
 ```
 
-### Cascade Delete for Audit Tables
+### Financial Columns: NUMERIC(19,4)
 
 ```sql
--- Child records deleted when parent removed
-CREATE TABLE player_audit (
-    id BIGSERIAL PRIMARY KEY,
-    player_id BIGINT NOT NULL,
-    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
-);
+-- GOOD - 19 digits, 4 decimal places for sub-cent precision
+balance NUMERIC(19,4) NOT NULL DEFAULT 0,
+bonus_balance NUMERIC(19,4) NOT NULL DEFAULT 0,
+
+-- BAD - precision loss, rounding errors
+balance FLOAT NOT NULL DEFAULT 0,  -- NEVER for money
+balance DECIMAL(10,2),              -- Too small for large transactions
 ```
 
-### Set Null for Optional References
+### Timestamps: Always WITH TIME ZONE
 
 ```sql
--- Orphan children rather than delete
-ALTER TABLE bonuses 
-ADD CONSTRAINT fk_bonus_parent
-FOREIGN KEY (parent_id) REFERENCES bonuses(id) ON DELETE SET NULL;
+-- GOOD - timezone-aware, prevents production bugs
+created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+last_login_at TIMESTAMP WITH TIME ZONE,
+
+-- BAD - timezone confusion in distributed systems
+created_at TIMESTAMP NOT NULL DEFAULT NOW(),  -- Which timezone?
 ```
 
----
+### UUID for External References
 
-## JSONB Usage
+```sql
+-- Use for public-facing identifiers, transaction references
+transaction_uuid UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+session_uuid UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+```
 
-### Entity Mapping
+## Indexing Patterns
+
+### WARNING: Missing Indices on Foreign Keys
+
+**The Problem:**
+
+PostgreSQL does NOT auto-create indices on foreign keys. Every FK without an index is a full table scan waiting to happen.
+
+```sql
+-- BAD - FK without index
+ALTER TABLE transactions ADD CONSTRAINT fk_wallet 
+    FOREIGN KEY (wallet_id) REFERENCES wallets(id);
+-- Queries filtering by wallet_id will be SLOW
+```
+
+**Why This Breaks:**
+1. Joins become O(n) instead of O(log n)
+2. Cascade deletes lock entire tables
+3. Reports timeout as data grows
+
+**The Fix:**
+
+```sql
+-- GOOD - always index FKs
+CREATE INDEX idx_transactions_wallet_id ON transactions(wallet_id);
+ALTER TABLE transactions ADD CONSTRAINT fk_wallet 
+    FOREIGN KEY (wallet_id) REFERENCES wallets(id);
+```
+
+### Covering Indices for Read-Heavy Queries
+
+```sql
+-- Include non-key columns to avoid table lookups
+CREATE INDEX idx_covering_player_stats 
+ON player_statistics(player_id, currency, period_type) 
+INCLUDE (total_deposits, total_wagered, deposit_count);
+```
+
+### Partial Indices for Filtered Queries
+
+```sql
+-- Index only active records - smaller, faster
+CREATE INDEX idx_stats_aggregation 
+ON player_statistics(period_type, currency, period_start) 
+WHERE period_type IN ('DAILY', 'MONTHLY');
+
+-- Index only pending transactions
+CREATE INDEX idx_pending_transactions 
+ON transactions(created_at) 
+WHERE status = 'PENDING';
+```
+
+### Composite Indices: Column Order Matters
+
+```sql
+-- GOOD - most selective column first
+CREATE INDEX idx_transactions_lookup 
+ON transactions(wallet_id, type, created_at);
+
+-- BAD - status has low cardinality
+CREATE INDEX idx_transactions_lookup 
+ON transactions(status, wallet_id, created_at);  -- Won't help most queries
+```
+
+## Query Patterns
+
+### Prevent N+1 with JOIN FETCH
 
 ```kotlin
-@Entity
-data class KycDocument(
-    @Type(JsonType::class)
-    @Column(name = "metadata", columnDefinition = "JSONB")
-    var metadata: Map<String, Any>? = null
-)
+// BAD - triggers N+1 queries
+val players = playerRepository.findAll()
+players.forEach { it.wallet }  // Each access = 1 query
+
+// GOOD - single query with join
+@Query("""
+    SELECT DISTINCT p FROM Player p
+    LEFT JOIN FETCH p.wallet
+    WHERE p.status = :status
+""")
+fun findByStatusWithWallet(@Param("status") status: PlayerStatus): List<Player>
 ```
 
-### Native Query on JSONB
+### Batch Operations with @Modifying
 
-```sql
--- Query nested JSON fields
-SELECT * FROM kyc_documents 
-WHERE metadata->>'documentType' = 'PASSPORT';
+```kotlin
+// GOOD - single UPDATE statement
+@Modifying
+@Query("""
+    UPDATE Player p 
+    SET p.lastActivityAt = :timestamp 
+    WHERE p.id IN :playerIds
+""")
+fun updateLastActivityBatch(
+    @Param("playerIds") playerIds: List<Long>,
+    @Param("timestamp") timestamp: LocalDateTime
+): Int
 
--- Check array contains value
-SELECT * FROM game_configs 
-WHERE features @> '["bonus_buy"]';
+// BAD - N separate updates
+playerIds.forEach { id ->
+    playerRepository.findById(id).ifPresent { 
+        it.lastActivityAt = timestamp
+        playerRepository.save(it)  // N queries!
+    }
+}
 ```
 
----
+### Dynamic Queries with Criteria API
 
-## Check Constraints
+```kotlin
+// For complex filtering where JPQL becomes unwieldy
+class GameRepositoryImpl : GameRepositoryCustom {
+    @PersistenceContext
+    private lateinit var entityManager: EntityManager
 
-### Enum Validation
-
-```sql
-CREATE TABLE payments (
-    status VARCHAR(20) NOT NULL 
-    CHECK (status IN ('PENDING', 'COMPLETED', 'FAILED', 'CANCELLED'))
-);
+    override fun findByDynamicCriteria(
+        providerIds: List<Long>,
+        minRtp: BigDecimal?,
+        hasJackpot: Boolean?
+    ): Page<Game> {
+        val cb = entityManager.criteriaBuilder
+        val cq = cb.createQuery(Game::class.java)
+        val root = cq.from(Game::class.java)
+        
+        val predicates = mutableListOf<Predicate>()
+        
+        if (providerIds.isNotEmpty()) {
+            predicates.add(root.get<Long>("providerId").`in`(providerIds))
+        }
+        
+        minRtp?.let {
+            predicates.add(cb.ge(root.get("rtp"), it))
+        }
+        
+        cq.where(*predicates.toTypedArray())
+        // ...
+    }
+}
 ```
 
-### Range Validation
+## Anti-Patterns
 
-```sql
-CREATE TABLE bonuses (
-    wagering_multiplier DECIMAL(5,2) NOT NULL CHECK (wagering_multiplier >= 1),
-    max_bonus DECIMAL(19,4) CHECK (max_bonus > 0)
-);
+### WARNING: BigDecimal from Double
+
+**The Problem:**
+
+```kotlin
+// BAD - precision loss from floating point
+val amount = BigDecimal(123.45)  // Actually 123.4500000000000028...
+```
+
+**Why This Breaks:**
+1. Financial calculations become incorrect
+2. Audit trails show wrong amounts
+3. Regulatory compliance failures
+
+**The Fix:**
+
+```kotlin
+// GOOD - exact decimal representation
+val amount = BigDecimal("123.45")
+val zero = BigDecimal.ZERO
+```
+
+### WARNING: Comparing BigDecimal with ==
+
+**The Problem:**
+
+```kotlin
+// BAD - compares scale, not value
+if (amount == BigDecimal.ZERO) { ... }  // 0.00 != 0
+```
+
+**The Fix:**
+
+```kotlin
+// GOOD - compares mathematical value
+if (amount.compareTo(BigDecimal.ZERO) == 0) { ... }
 ```

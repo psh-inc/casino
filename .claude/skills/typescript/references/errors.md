@@ -1,240 +1,251 @@
 ```markdown
-# TypeScript Error Handling
+# TypeScript Error Handling Reference
 
-## HTTP Error Handling Patterns
+Error handling patterns for the casino platform's TypeScript code.
 
-### Typed Error Handling with catchError
+## Observable Error Handling
+
+### Standard catchError Pattern
 
 ```typescript
-initiateWithdrawal(request: WithdrawalRequest): Observable<WithdrawalResponse> {
-  return this.http.post<WithdrawalResponse>(`${this.apiUrl}/withdrawals`, request).pipe(
-    catchError((error: HttpErrorResponse) => {
-      if (error.status === 400 && error.error?.message?.includes('KYC verification required')) {
-        this.handleKycRequired(error.error.message);
-        return EMPTY;
-      }
-      if (error.status === 422) {
-        return throwError(() => new ValidationError(error.error.details));
-      }
-      return throwError(() => error);
-    })
+login(username: string, password: string): Observable<LoginResponse> {
+  return this.http.post<LoginResponse>(`${this.apiUrl}/login`, { username, password })
+    .pipe(
+      tap(response => {
+        this.storeTokens(response.accessToken, response.refreshToken);
+        this.isAuthenticatedSubject.next(true);
+      }),
+      catchError(error => {
+        console.error('Login failed:', error);
+        return throwError(() => error);
+      })
+    );
+}
+```
+
+### Fallback Value Pattern
+
+```typescript
+checkNameExists(name: string): Observable<boolean> {
+  return this.http.get<{ available: boolean }>(`${this.apiUrl}/check-name`, {
+    params: { name }
+  }).pipe(
+    map(response => !response.available),
+    catchError(() => of(false))  // Fallback to "doesn't exist"
+  );
+}
+
+getAllItems(): Observable<Item[]> {
+  return this.http.get<Page<Item>>(this.apiUrl).pipe(
+    map(page => page.content),
+    catchError(() => of([]))  // Empty array on error
   );
 }
 ```
 
----
-
-### WARNING: Silent Error Swallowing
+### WARNING: Silent catchError
 
 **The Problem:**
 
 ```typescript
-// BAD - Error disappears
-getPlayers(): Observable<Player[]> {
-  return this.http.get<Player[]>(this.apiUrl).pipe(
-    catchError(error => {
-      console.log(error);  // Only logs, no handling
-      return of([]);       // Returns empty, user sees nothing
-    })
+// BAD - Silently swallows errors
+getData(): Observable<Data[]> {
+  return this.http.get<Data[]>(url).pipe(
+    catchError(() => of([]))  // No logging, no context
   );
 }
 ```
 
 **Why This Breaks:**
-1. User has no idea something failed
-2. Empty data looks like "no results" not "error"
-3. Debugging production issues becomes impossible
+1. Errors are invisible - debugging is impossible
+2. No metrics or monitoring for failures
+3. Users see empty data without explanation
 
 **The Fix:**
 
 ```typescript
-// GOOD - Proper error handling
-getPlayers(): Observable<Player[]> {
-  return this.http.get<Player[]>(this.apiUrl).pipe(
-    catchError((error: HttpErrorResponse) => {
-      console.error('Failed to fetch players:', error);
-      this.snackBar.open('Failed to load players. Please try again.', 'Dismiss');
-      return throwError(() => error);  // Propagate for component handling
+// GOOD - Log before fallback
+getData(): Observable<Data[]> {
+  return this.http.get<Data[]>(url).pipe(
+    catchError(error => {
+      console.error('Failed to fetch data:', error);
+      // Or: this.errorService.report(error);
+      return of([]);
     })
   );
 }
 ```
 
----
+## Synchronous Error Handling
 
-### Graceful Degradation Pattern
+### Try-Catch for Parsing
 
 ```typescript
-// GOOD - Return defaults on non-critical failures
-getSignupConfiguration(): Observable<SignupConfiguration> {
-  return this.http.get<SignupConfiguration>(`${this.apiUrl}/signup-config`).pipe(
-    catchError(error => {
-      console.error('Failed to load signup configuration:', error);
-      return of(this.getDefaultConfiguration());  // Fallback config
-    })
-  );
-}
-
-private getDefaultConfiguration(): SignupConfiguration {
-  return {
-    fields: [{ key: 'email', required: true, type: 'EMAIL' }],
-    termsRequired: true
-  };
+static decodeToken(token: string): JwtPayload | null {
+  try {
+    const cleanToken = token.replace('Bearer ', '');
+    const parts = cleanToken.split('.');
+    if (parts.length !== 3) {
+      console.error('Invalid JWT format');
+      return null;
+    }
+    const payload = parts[1];
+    return JSON.parse(atob(payload));
+  } catch (error) {
+    console.error('Error decoding JWT:', error);
+    return null;
+  }
 }
 ```
 
----
+### WebSocket Message Handling
 
-### WARNING: Using `any` in Error Handlers
+```typescript
+private handleMessage(message: IMessage, type: string): void {
+  try {
+    const data = JSON.parse(message.body);
+    this.processMessage(data, type);
+  } catch (error) {
+    console.error('Error handling WebSocket message:', error);
+    // Don't rethrow - keep WebSocket connection alive
+  }
+}
+```
+
+### WARNING: Bare Try-Catch
 
 **The Problem:**
 
 ```typescript
-// BAD - Losing type information
-catchError((error: any) => {
-  if (error.response.data.code === 'INVALID_TOKEN') { ... }
-})
+// BAD - Catches everything, including programming errors
+try {
+  const result = processData(input);
+  return result.value;  // What if result is undefined?
+} catch {
+  return null;
+}
 ```
 
 **Why This Breaks:**
-1. No autocomplete for error properties
-2. Typos in property names aren't caught
-3. API changes break silently
+1. Hides bugs that should be fixed
+2. `result.value` on undefined should crash, not silently fail
+3. Makes debugging nearly impossible
 
 **The Fix:**
 
 ```typescript
-// GOOD - Typed error response
-interface ApiError {
-  status: string;
-  code: string;
-  message: string;
-  timestamp: string;
-  details?: { fields: Record<string, string> };
+// GOOD - Catch specific expected errors
+try {
+  const result = JSON.parse(jsonString);
+  return result;
+} catch (error) {
+  if (error instanceof SyntaxError) {
+    console.error('Invalid JSON:', jsonString);
+    return null;
+  }
+  throw error;  // Rethrow unexpected errors
 }
-
-catchError((error: HttpErrorResponse) => {
-  const apiError = error.error as ApiError;
-  if (apiError.code === 'INVALID_TOKEN') { ... }
-})
 ```
 
----
+## Type Guards for Safe Access
 
-### Custom Error Classes
+### Narrowing Unknown Types
 
 ```typescript
-export class ValidationError extends Error {
-  constructor(public readonly fields: Record<string, string>) {
-    super('Validation failed');
-    this.name = 'ValidationError';
-  }
-}
-
-export class AuthenticationError extends Error {
-  constructor(message = 'Authentication required') {
-    super(message);
-    this.name = 'AuthenticationError';
-  }
+function isApiError(error: unknown): error is { message: string; code: string } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    'code' in error
+  );
 }
 
 // Usage
-catchError((error: HttpErrorResponse) => {
-  if (error.status === 401) {
-    return throwError(() => new AuthenticationError());
-  }
-  if (error.status === 422) {
-    return throwError(() => new ValidationError(error.error.details.fields));
+catchError((error: unknown) => {
+  if (isApiError(error)) {
+    this.showError(error.message);  // Type-safe access
+  } else {
+    this.showError('Unknown error occurred');
   }
   return throwError(() => error);
 })
 ```
 
----
-
-### Component Error State Pattern
+### Optional Chaining for Nested Access
 
 ```typescript
-export class PlayerListComponent {
-  players$ = new BehaviorSubject<Player[]>([]);
-  error$ = new BehaviorSubject<string | null>(null);
-  loading$ = new BehaviorSubject<boolean>(false);
+// GOOD - Safe property access
+const firstName = response?.player?.firstName ?? 'Unknown';
+const balance = wallet?.summary?.balance ?? 0;
 
-  loadPlayers(): void {
-    this.loading$.next(true);
-    this.error$.next(null);
-    
-    this.playersService.getPlayers().pipe(
-      finalize(() => this.loading$.next(false))
-    ).subscribe({
-      next: players => this.players$.next(players),
-      error: (err: HttpErrorResponse) => {
-        this.error$.next(this.getErrorMessage(err));
+// With methods
+const playerId = this.authService.currentUser?.playerId;
+```
+
+## HTTP Error Interceptor Pattern
+
+```typescript
+@Injectable()
+export class ErrorInterceptor implements HttpInterceptor {
+  constructor(
+    private authService: AuthService,
+    private notificationService: NotificationService
+  ) {}
+
+  intercept(request: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
+    return next.handle(request).pipe(
+      catchError((error: HttpErrorResponse) => {
+        if (error.status === 401) {
+          this.authService.logout();
+          return throwError(() => error);
+        }
+
+        if (error.status === 403) {
+          this.notificationService.showError('Access denied');
+        }
+
+        if (error.status >= 500) {
+          this.notificationService.showError('Server error. Please try again.');
+        }
+
+        return throwError(() => error);
+      })
+    );
+  }
+}
+```
+
+## Form Validation Errors
+
+```typescript
+interface ValidationError {
+  field: string;
+  message: string;
+  code: string;
+}
+
+interface ApiErrorResponse {
+  status: 'ERROR';
+  code: string;
+  message: string;
+  details?: {
+    fields: Record<string, string>;
+  };
+}
+
+// Map API errors to form
+handleValidationErrors(error: ApiErrorResponse, form: FormGroup): void {
+  if (error.details?.fields) {
+    Object.entries(error.details.fields).forEach(([field, message]) => {
+      const control = form.get(field);
+      if (control) {
+        control.setErrors({ serverError: message });
       }
     });
   }
-
-  private getErrorMessage(error: HttpErrorResponse): string {
-    if (error.status === 0) return 'Network error. Check your connection.';
-    if (error.status === 403) return 'You do not have permission to view this.';
-    if (error.status === 500) return 'Server error. Please try again later.';
-    return error.error?.message ?? 'An unexpected error occurred.';
-  }
 }
 ```
 
----
-
-### WARNING: Ignoring Promise Rejections
-
-**The Problem:**
-
-```typescript
-// BAD - Unhandled promise rejection
-async ngOnInit() {
-  const data = await this.service.fetchData();  // No try/catch
-}
-```
-
-**Why This Breaks:**
-1. Unhandled promise rejections crash in strict mode
-2. App state becomes undefined
-3. User sees blank screen with no feedback
-
-**The Fix:**
-
-```typescript
-// GOOD - Proper async/await error handling
-async ngOnInit() {
-  try {
-    const data = await firstValueFrom(this.service.fetchData());
-    this.data = data;
-  } catch (error) {
-    console.error('Failed to fetch data:', error);
-    this.error = 'Failed to load data';
-  }
-}
-```
-
----
-
-### RxJS Error Recovery
-
-```typescript
-// Retry with exponential backoff
-getData(): Observable<Data> {
-  return this.http.get<Data>(this.apiUrl).pipe(
-    retry({
-      count: 3,
-      delay: (error, retryCount) => timer(Math.pow(2, retryCount) * 1000)
-    }),
-    catchError(error => {
-      console.error('All retries failed:', error);
-      return throwError(() => error);
-    })
-  );
-}
-```
-
-See the **angular** skill for interceptor-based global error handling.
+See the **angular** skill for form handling patterns.
 ```

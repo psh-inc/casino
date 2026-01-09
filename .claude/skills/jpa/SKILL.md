@@ -6,61 +6,52 @@ description: |
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
-# JPA Skill
+# JPA Skill - Casino Platform
 
-This project uses Spring Data JPA with Hibernate 6.x on PostgreSQL 14+. All entities are Kotlin data classes with BIGSERIAL IDs, using `FetchType.LAZY` by default and `JOIN FETCH` for N+1 prevention. The repository layer follows Spring Data conventions with custom implementations for complex queries.
+JPA/Hibernate patterns for the casino platform backend. This codebase uses Kotlin data classes with Spring Data JPA, PostgreSQL, and strict conventions for financial data handling.
 
 ## Quick Start
 
-### Entity Definition
+### Entity with ID and Auditing
 
 ```kotlin
 @Entity
-@Table(name = "wallets")
-data class Wallet(
+@Table(name = "transactions")
+data class Transaction(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null,
-    
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "player_id", nullable = false, unique = true)
-    val player: Player,
-    
+
     @Column(nullable = false, precision = 19, scale = 4)
-    var balance: BigDecimal = BigDecimal.ZERO,
-    
-    @Version
-    val version: Long = 0,
-    
+    val amount: BigDecimal,
+
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    var status: TransactionStatus,
+
     @Column(name = "created_at", nullable = false)
-    val createdAt: LocalDateTime = LocalDateTime.now()
-) {
-    override fun hashCode(): Int = id?.hashCode() ?: 0
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is Wallet) return false
-        return id != null && id == other.id
-    }
-}
+    val createdAt: LocalDateTime = LocalDateTime.now(),
+
+    @Column(name = "updated_at", nullable = false)
+    var updatedAt: LocalDateTime = LocalDateTime.now(),
+
+    @Version
+    var version: Long = 0
+)
 ```
 
-### Repository Pattern
+### Repository with JOIN FETCH
 
 ```kotlin
-@Repository
-interface PlayerRepository : JpaRepository<Player, Long>, PlayerRepositoryCustom {
+interface PlayerRepository : JpaRepository<Player, Long> {
     fun findByUsername(username: String): Optional<Player>
-    fun existsByEmail(email: String): Boolean
-    
-    @Query("SELECT p FROM Player p WHERE p.status = 'ACTIVE'")
-    fun findActivePlayers(): List<Player>
-    
+
     @Query("""
         SELECT DISTINCT p FROM Player p
         LEFT JOIN FETCH p.wallet
-        WHERE p.id = :id
+        WHERE p.status = 'ACTIVE'
     """)
-    fun findByIdWithDetails(@Param("id") id: Long): Optional<Player>
+    fun findActivePlayersWithWallet(): List<Player>
 }
 ```
 
@@ -68,54 +59,54 @@ interface PlayerRepository : JpaRepository<Player, Long>, PlayerRepositoryCustom
 
 | Concept | Usage | Example |
 |---------|-------|---------|
-| ID Generation | BIGSERIAL via IDENTITY | `@GeneratedValue(strategy = GenerationType.IDENTITY)` |
-| Lazy Loading | Default for relations | `@ManyToOne(fetch = FetchType.LAZY)` |
-| Optimistic Lock | Version field | `@Version val version: Long = 0` |
-| Pessimistic Lock | For concurrent updates | `@Lock(LockModeType.PESSIMISTIC_WRITE)` |
-| Transaction | Class or method level | `@Transactional(readOnly = true)` |
+| ID Type | Always BIGSERIAL | `@GeneratedValue(strategy = GenerationType.IDENTITY)` |
+| Money | BigDecimal from String | `BigDecimal("123.45")` not `BigDecimal(123.45)` |
+| Dates | LocalDateTime, UTC | `LocalDateTime.now(ZoneOffset.UTC)` |
+| Enums | STRING not ORDINAL | `@Enumerated(EnumType.STRING)` |
+| Locking | Optimistic | `@Version var version: Long = 0` |
+| Lazy Loading | Default for relations | `fetch = FetchType.LAZY` |
 
 ## Common Patterns
 
-### Preventing N+1 with JOIN FETCH
+### Preventing N+1 Queries
 
-**When:** Loading entities with associations in a single query
+**When:** Loading entities with their relationships
 
 ```kotlin
-@Query("""
-    SELECT p FROM Player p
-    JOIN FETCH p.wallet w
-    LEFT JOIN FETCH p.addresses
-    WHERE p.id = :id
-""")
-fun findByIdWithDetails(@Param("id") id: Long): Optional<Player>
+// BAD - N+1 queries
+val players = repo.findByStatus(ACTIVE)
+players.forEach { it.wallet?.balance }  // Separate query per player!
+
+// GOOD - Single query with JOIN FETCH
+@Query("SELECT p FROM Player p LEFT JOIN FETCH p.wallet WHERE p.status = 'ACTIVE'")
+fun findActivePlayersWithWallet(): List<Player>
 ```
 
-### Atomic Updates Without Load
+### Bulk Updates with @Modifying
 
-**When:** High-performance updates avoiding entity load
+**When:** Updating multiple records without loading entities
 
 ```kotlin
 @Modifying
 @Query("""
-    UPDATE Wallet w 
-    SET w.balance = w.balance + :amount, 
-        w.version = w.version + 1
-    WHERE w.player.id = :playerId 
-    AND w.balance + :amount >= 0
+    UPDATE Player p SET 
+        p.status = :status, 
+        p.updatedAt = CURRENT_TIMESTAMP 
+    WHERE p.lastActivityAt < :threshold
 """)
-fun updateBalanceAtomic(
-    @Param("playerId") playerId: Long, 
-    @Param("amount") amount: BigDecimal
-): Int  // Returns affected rows
+fun deactivateInactivePlayers(
+    @Param("status") status: PlayerStatus,
+    @Param("threshold") threshold: LocalDateTime
+): Int
 ```
 
 ## See Also
 
-- [patterns](references/patterns.md) - Entity, repository, and query patterns
-- [workflows](references/workflows.md) - Transaction management and testing workflows
+- [patterns](references/patterns.md) - Entity, relationship, and query patterns
+- [workflows](references/workflows.md) - Common development workflows
 
 ## Related Skills
 
-For database migrations and schema changes, see the **postgresql** skill.
-For service layer patterns that use JPA, see the **spring-boot** skill.
-For Kotlin-specific syntax patterns, see the **kotlin** skill.
+- See the **spring-boot** skill for service layer patterns and transactions
+- See the **postgresql** skill for Flyway migrations and database design
+- See the **kotlin** skill for Kotlin-specific JPA considerations

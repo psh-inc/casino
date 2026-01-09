@@ -8,7 +8,7 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 
 # Playwright Skill
 
-E2E testing framework for the casino customer frontend (`casino-customer-f/`) using Playwright. Tests run against Angular 17 with standalone components, testing critical user flows including authentication, games listing, profile management, and KYC verification. The project uses multi-browser testing with mobile viewport support.
+Playwright E2E testing for the Angular 17 customer frontend (`casino-customer-f/`). Tests cover authentication, game browsing, wallet operations, KYC verification, and sports betting flows. All tests run headless by default with full browser automation support.
 
 ## Quick Start
 
@@ -16,25 +16,34 @@ E2E testing framework for the casino customer frontend (`casino-customer-f/`) us
 
 ```bash
 cd casino-customer-f
-npx playwright test                    # Run all tests
-npx playwright test --ui               # Interactive UI mode
-npx playwright test --headed           # See browser while testing
-npx playwright test e2e/auth.spec.ts   # Run specific test file
+
+# Run all E2E tests
+npm run e2e
+
+# Interactive UI mode for debugging
+npm run e2e:ui
+
+# Run specific test file
+npx playwright test tests/auth.spec.ts
+
+# Run with headed browser
+npx playwright test --headed
 ```
 
 ### Basic Test Structure
 
 ```typescript
+// tests/games.spec.ts
 import { test, expect } from '@playwright/test';
 
-test.describe('Feature Name', () => {
+test.describe('Game Lobby', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:4201');
+    await page.goto('/games');
   });
 
-  test('should perform action', async ({ page }) => {
-    await page.getByRole('button', { name: 'Login' }).first().click();
-    await expect(page.locator('.auth-modal-backdrop')).toBeVisible();
+  test('should display game categories', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Slots' })).toBeVisible();
+    await expect(page.getByTestId('game-grid')).toHaveCount(1);
   });
 });
 ```
@@ -43,36 +52,59 @@ test.describe('Feature Name', () => {
 
 | Concept | Usage | Example |
 |---------|-------|---------|
-| Locators | Target elements | `page.locator('.class')`, `page.getByRole()` |
-| Assertions | Verify state | `await expect(el).toBeVisible()` |
-| API Mocking | Stub backend | `page.route('**/api/**', handler)` |
-| Screenshots | Visual debugging | `page.screenshot({ path: 'name.png' })` |
-| Mobile Testing | Responsive tests | `page.setViewportSize({ width: 375, height: 667 })` |
+| Page Object Model | Encapsulate page interactions | `LoginPage.login(user)` |
+| Test Fixtures | Share setup across tests | `test.use({ storageState })` |
+| Locators | Prefer accessible selectors | `getByRole('button')` |
+| Assertions | Use web-first assertions | `await expect(el).toBeVisible()` |
+| Snapshots | Visual regression testing | `expect(page).toHaveScreenshot()` |
 
 ## Common Patterns
 
-### Login Flow Testing
+### Authentication Flow Test
+
+**When:** Testing login, registration, or protected routes
 
 ```typescript
-test('should login successfully', async ({ page }) => {
-  await page.getByRole('button', { name: 'Login' }).first().click();
-  await page.locator('input[formControlName="username"]').fill('testuser');
-  await page.locator('input[formControlName="password"]').fill('Test1234');
-  await page.locator('button[type="submit"]').click();
+test('user can login and access wallet', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('test@example.com');
+  await page.getByLabel('Password').fill('SecurePass123');
+  await page.getByRole('button', { name: 'Sign In' }).click();
   
-  await expect(page.locator('.user-balance-section')).toBeVisible({ timeout: 10000 });
+  await expect(page).toHaveURL('/dashboard');
+  await page.getByRole('link', { name: 'Wallet' }).click();
+  await expect(page.getByTestId('balance-display')).toBeVisible();
 });
 ```
 
-### Mock API Responses
+### Form Validation Testing
+
+**When:** Testing bonus claims, KYC forms, deposit forms
 
 ```typescript
-await page.route('**/auth/player/login', route => {
-  route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ token: 'mock-jwt-token' })
-  });
+test('shows validation errors on invalid deposit', async ({ page }) => {
+  await page.goto('/wallet/deposit');
+  await page.getByLabel('Amount').fill('-50');
+  await page.getByRole('button', { name: 'Deposit' }).click();
+  
+  await expect(page.getByText('Amount must be positive')).toBeVisible();
+});
+```
+
+### Waiting for API Responses
+
+**When:** Testing actions that trigger backend calls
+
+```typescript
+test('game session starts after API response', async ({ page }) => {
+  await page.goto('/games');
+  
+  const responsePromise = page.waitForResponse('**/api/v1/games/*/session');
+  await page.getByTestId('game-card-starburst').click();
+  const response = await responsePromise;
+  
+  expect(response.status()).toBe(200);
+  await expect(page.getByTestId('game-iframe')).toBeVisible();
 });
 ```
 
@@ -83,6 +115,5 @@ await page.route('**/auth/player/login', route => {
 
 ## Related Skills
 
-- See the **angular** skill for component architecture patterns
-- See the **typescript** skill for type definitions
-- See the **jasmine** skill for unit testing (Playwright is for E2E only)
+- **angular** - Frontend framework for customer application
+- **typescript** - Language for test files

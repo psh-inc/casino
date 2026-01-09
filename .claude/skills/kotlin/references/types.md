@@ -1,262 +1,203 @@
-```markdown
-# Kotlin Types Reference
+# Kotlin Types
 
-Type patterns for data classes, enums, sealed classes, and generics in the casino-b/ codebase.
+Type system patterns and best practices for the casino backend.
 
 ## Data Classes
 
-### Basic Data Class
-
-```kotlin
-data class PlayerDto(
-    val id: Long,
-    val username: String,
-    val email: String,
-    val status: PlayerStatus,
-    val createdAt: LocalDateTime
-) {
-    companion object {
-        fun from(player: Player) = PlayerDto(
-            id = player.id!!,
-            username = player.username,
-            email = player.email,
-            status = player.status,
-            createdAt = player.createdAt
-        )
-    }
-}
-```
-
-### Data Class with Default Values
-
-```kotlin
-data class ProfileUpdateRequest(
-    val playerId: Long,
-    val documentId: Long,
-    val updateFirstName: Boolean = false,
-    val updateLastName: Boolean = false,
-    val updateDateOfBirth: Boolean = false,
-    val adminUserId: Long,
-    val reason: String
-)
-```
-
-### Nested Data Classes
-
-```kotlin
-data class ProfileUpdatePreview(
-    val playerId: Long,
-    val currentProfile: PlayerProfileData,
-    val extractedData: ExtractedProfileData,
-    val differences: List<ProfileDifference>,
-    val canUpdate: Boolean,
-    val warnings: List<String>
-) {
-    data class ProfileDifference(
-        val field: String,
-        val currentValue: String?,
-        val newValue: String?
-    )
-}
-```
-
-## WARNING: Data Classes with JPA Entities
+### WARNING: Mutable Properties in Data Classes
 
 **The Problem:**
 
 ```kotlin
-// BAD - Data class as JPA entity causes issues
-@Entity
-data class Player(
-    @Id @GeneratedValue
-    val id: Long? = null,
-    val username: String
+// BAD - mutable data class
+data class PlayerDto(
+    var id: Long,
+    var username: String,
+    var balance: BigDecimal
 )
 ```
 
 **Why This Breaks:**
-1. equals/hashCode includes all fields - breaks JPA identity semantics
-2. Lazy-loaded relationships cause unexpected behavior
-3. Circular references in toString() cause StackOverflow
+1. DTOs should be immutable—unexpected mutations cause bugs
+2. Breaks hashCode/equals contract if used in collections
+3. Thread safety issues in concurrent contexts
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Regular class with manual equals/hashCode
-@Entity
-@Table(name = "players")
-class Player(
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long? = null,
-    
-    @Column(nullable = false, unique = true)
-    val username: String
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is Player) return false
-        return id != null && id == other.id
-    }
-    
-    override fun hashCode(): Int = id?.hashCode() ?: 0
-}
+// GOOD - immutable with val
+data class PlayerDto(
+    val id: Long,
+    val username: String,
+    val balance: BigDecimal
+)
+
+// If you need to "modify", use copy()
+val updated = playerDto.copy(balance = newBalance)
 ```
 
-**When You Might Be Tempted:**
-When you want auto-generated equals/hashCode for entities. Always override manually using ID only.
+## Nullable Types
 
-## Enum Classes
-
-### Basic Enum
+### Nullable vs Non-Nullable Design
 
 ```kotlin
-enum class PlayerStatus {
-    PENDING, ACTIVE, FROZEN, BLOCKED, SUSPENDED, SELF_EXCLUDED, COOLING_OFF
-}
+// GOOD - entity ID nullable before persistence
+@Entity
+data class Player(
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long? = null,  // null until saved
+
+    @Column(nullable = false)
+    val username: String,  // never null
+
+    val nickname: String? = null  // optional field
+)
 ```
+
+### DTO Nullability
+
+```kotlin
+// GOOD - response DTO with non-null ID (already persisted)
+data class PlayerResponse(
+    val id: Long,  // guaranteed after fetch
+    val username: String,
+    val nickname: String?,  // may be null
+    val lastLoginAt: LocalDateTime?  // may be null
+)
+
+// GOOD - request DTO with nullable optional fields
+data class UpdatePlayerRequest(
+    val nickname: String? = null,  // only update if provided
+    val locale: String? = null
+)
+```
+
+## Enums
 
 ### Enum with Properties
 
 ```kotlin
-enum class TransactionType(val isDebit: Boolean) {
-    DEPOSIT(false),
-    WITHDRAWAL(true),
-    BET(true),
-    WIN(false),
-    BONUS(false),
-    REFUND(false);
-    
-    val isCredit: Boolean get() = !isDebit
+enum class PlayerStatus(val canPlay: Boolean, val canWithdraw: Boolean) {
+    PENDING(false, false),
+    ACTIVE(true, true),
+    FROZEN(false, false),
+    BLOCKED(false, false),
+    SUSPENDED(false, false),
+    SELF_EXCLUDED(false, false),
+    COOLING_OFF(false, true);
+
+    fun isRestricted(): Boolean = !canPlay || !canWithdraw
 }
 ```
 
-### Enum with Companion Factory
-
-```kotlin
-enum class BetType {
-    GAME_BET, BONUS_BET, MIXED_BET, FREE_SPIN_BET,
-    GAME_WIN, BONUS_WIN, MIXED_WIN, FREE_SPIN_WIN,
-    SPORTS_BET, SPORTS_WIN;
-    
-    companion object {
-        fun initialForGameRound(
-            isFreeSpin: Boolean = false,
-            isBonusOnly: Boolean = false,
-            isMixed: Boolean = false
-        ): BetType = when {
-            isFreeSpin -> FREE_SPIN_BET
-            isBonusOnly -> BONUS_BET
-            isMixed -> MIXED_BET
-            else -> GAME_BET
-        }
-        
-        fun winTypeFor(betType: BetType): BetType = when (betType) {
-            GAME_BET -> GAME_WIN
-            BONUS_BET -> BONUS_WIN
-            MIXED_BET -> MIXED_WIN
-            FREE_SPIN_BET -> FREE_SPIN_WIN
-            SPORTS_BET -> SPORTS_WIN
-            else -> betType
-        }
-    }
-}
-```
-
-## Sealed Classes
-
-### Result Pattern
-
-```kotlin
-sealed class ValidationResult {
-    object Valid : ValidationResult()
-    data class Invalid(val errors: List<String>) : ValidationResult()
-}
-
-fun validate(request: CreatePlayerRequest): ValidationResult {
-    val errors = mutableListOf<String>()
-    if (request.email.isBlank()) errors += "Email required"
-    if (request.password.length < 8) errors += "Password too short"
-    return if (errors.isEmpty()) ValidationResult.Valid 
-           else ValidationResult.Invalid(errors)
-}
-```
-
-### Sealed Interface for ADT
-
-```kotlin
-sealed interface PaymentState {
-    data class Pending(val checkUrl: String) : PaymentState
-    data class Completed(val transactionId: String) : PaymentState
-    data class Failed(val code: String, val message: String) : PaymentState
-    data class Cancelled(val reason: String) : PaymentState
-}
-```
-
-## WARNING: Using String Instead of Enum
+### WARNING: String-Based Type Discrimination
 
 **The Problem:**
 
 ```kotlin
-// BAD - Stringly-typed
-fun setStatus(status: String) {
-    if (status == "active" || status == "ACTIVE") { ... }
+// BAD - stringly typed
+fun processReward(type: String, amount: BigDecimal) {
+    when (type) {
+        "MONEY" -> processMoney(amount)
+        "FREE_SPINS" -> processFreeSpins(amount)
+        else -> throw IllegalArgumentException("Unknown type")
+    }
 }
 ```
 
 **Why This Breaks:**
-1. Typos cause silent bugs ("actve", "ACTIV")
-2. No compile-time validation
-3. Refactoring misses string literals
+1. No compile-time safety—typos cause runtime errors
+2. Refactoring doesn't catch all usages
+3. No IDE autocomplete support
 
 **The Fix:**
 
 ```kotlin
-// GOOD - Type-safe enum
-enum class Status { ACTIVE, INACTIVE, PENDING }
+// GOOD - use enum
+enum class RewardType {
+    MONEY, FREE_SPINS, SPORTS_BONUS
+}
 
-fun setStatus(status: Status) {
-    when (status) {
-        Status.ACTIVE -> { ... }
-        Status.INACTIVE -> { ... }
-        Status.PENDING -> { ... }
+fun processReward(type: RewardType, amount: BigDecimal) {
+    when (type) {
+        RewardType.MONEY -> processMoney(amount)
+        RewardType.FREE_SPINS -> processFreeSpins(amount)
+        RewardType.SPORTS_BONUS -> processSportsBonus(amount)
     }
+}
+```
+
+## BigDecimal Handling
+
+### WARNING: Creating BigDecimal from Double
+
+**The Problem:**
+
+```kotlin
+// BAD - precision loss
+val amount = BigDecimal(123.45)  // Actually 123.4500000000000028421...
+val rate = BigDecimal(0.1)       // Not exactly 0.1
+```
+
+**Why This Breaks:**
+1. Double cannot represent decimals exactly
+2. Financial calculations accumulate errors
+3. €99.99 may become €99.98999999
+
+**The Fix:**
+
+```kotlin
+// GOOD - from String
+val amount = BigDecimal("123.45")
+val rate = BigDecimal("0.1")
+
+// GOOD - use constants
+val zero = BigDecimal.ZERO
+val one = BigDecimal.ONE
+```
+
+### BigDecimal Comparisons
+
+```kotlin
+// GOOD - compareTo for value comparison
+fun isPositive(amount: BigDecimal): Boolean =
+    amount.compareTo(BigDecimal.ZERO) > 0
+
+// GOOD - signum for sign check
+fun getBalanceStatus(balance: BigDecimal): String = when (balance.signum()) {
+    1 -> "Positive"
+    0 -> "Zero"
+    -1 -> "Negative"
+    else -> error("Impossible")
 }
 ```
 
 ## Type Aliases
 
 ```kotlin
+// GOOD - meaningful aliases for complex types
 typealias PlayerId = Long
-typealias Amount = BigDecimal
-typealias GameIds = Set<Long>
+typealias TransactionId = String
+typealias CurrencyCode = String
 
-fun processPayment(playerId: PlayerId, amount: Amount): TransactionId
+// GOOD - function type aliases
+typealias PlayerValidator = (Player) -> ValidationResult
+typealias TransactionMapper = (Transaction) -> TransactionDto
 ```
 
-## Generics
-
-### Generic Repository Interface
+## Generic Types
 
 ```kotlin
-interface CrudService<T, ID> {
-    fun findById(id: ID): T?
-    fun findAll(): List<T>
-    fun save(entity: T): T
-    fun deleteById(id: ID)
+// GOOD - generic response wrapper
+data class ApiResponse<T>(
+    val status: String,
+    val data: T?,
+    val error: String? = null
+) {
+    companion object {
+        fun <T> success(data: T) = ApiResponse("SUCCESS", data)
+        fun <T> error(message: String) = ApiResponse<T>("ERROR", null, message)
+    }
 }
-```
-
-### Bounded Generics
-
-```kotlin
-fun <T : Comparable<T>> findMax(items: List<T>): T? = items.maxOrNull()
-
-inline fun <reified T> parseJson(json: String): T = 
-    objectMapper.readValue(json, T::class.java)
-```
-
-## Related Skills
-
-- See the **jpa** skill for entity mapping patterns
-- See the **spring-boot** skill for DTO validation
 ```

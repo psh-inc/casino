@@ -1,180 +1,253 @@
-# State Management Patterns
+# Angular State Management Patterns
 
-This project uses BehaviorSubject-based services for state management instead of NgRx/Akita.
+## BehaviorSubject Pattern
 
-## State Service Pattern
+This codebase uses `BehaviorSubject` for service-level state management. No external state library (NgRx, Akita) is used.
+
+### Basic State Service
 
 ```typescript
 @Injectable({ providedIn: 'root' })
 export class AuthService implements OnDestroy {
-  // Private mutable state
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   private isAuthenticatedSubject = new BehaviorSubject<boolean>(false);
   private destroy$ = new Subject<void>();
 
-  // Public read-only observables
+  // Expose as Observable (read-only)
   public currentUser$ = this.currentUserSubject.asObservable();
   public isAuthenticated$ = this.isAuthenticatedSubject.asObservable();
 
-  // State mutations through methods
+  // Synchronous access when needed
+  get currentUser(): User | null {
+    return this.currentUserSubject.value;
+  }
+
+  get isAuthenticated(): boolean {
+    return this.isAuthenticatedSubject.value;
+  }
+
   login(request: LoginRequest): Observable<LoginResponse> {
-    return this.http.post<LoginResponse>('/api/auth/login', request).pipe(
+    return this.http.post<LoginResponse>(`${this.authUrl}/login`, request).pipe(
       tap(response => {
-        this.storeTokens(response.token, response.refreshToken);
-        this.currentUserSubject.next(this.parseUserFromToken(response.token));
-        this.isAuthenticatedSubject.next(true);
+        if (response.token) {
+          this.storeTokens(response.token, response.refreshToken);
+          this.currentUserSubject.next(response.user);
+          this.isAuthenticatedSubject.next(true);
+        }
       })
     );
   }
 
   logout(): void {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    this.clearTokens();
     this.currentUserSubject.next(null);
     this.isAuthenticatedSubject.next(false);
-    this.router.navigate(['/']);
   }
 
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
-    this.currentUserSubject.complete();
-    this.isAuthenticatedSubject.complete();
   }
 }
 ```
 
-## WARNING: Direct Subject Exposure
+### Multi-State Service (WalletService)
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class WalletV2Service implements OnDestroy {
+  private currentPlayerId$ = new BehaviorSubject<number | null>(null);
+  private playerBalance$ = new BehaviorSubject<PlayerBalanceDto | null>(null);
+  private wageringStatus$ = new BehaviorSubject<WageringStatus | null>(null);
+  private destroy$ = new Subject<void>();
+
+  getCurrentPlayerId(): Observable<number | null> {
+    return this.currentPlayerId$.asObservable();
+  }
+
+  getPlayerBalance(): Observable<PlayerBalanceDto | null> {
+    return this.playerBalance$.asObservable();
+  }
+
+  getWageringStatus(): Observable<WageringStatus | null> {
+    return this.wageringStatus$.asObservable();
+  }
+
+  setCurrentPlayer(playerId: number): void {
+    this.currentPlayerId$.next(playerId);
+    this.startBalanceRefresh(playerId);
+  }
+
+  clearState(): void {
+    this.currentPlayerId$.next(null);
+    this.playerBalance$.next(null);
+    this.wageringStatus$.next(null);
+  }
+}
+```
+
+---
+
+## WARNING: Exposing BehaviorSubject Directly
 
 **The Problem:**
 
 ```typescript
-// BAD - Exposing BehaviorSubject directly
+// BAD - Exposes mutable subject
 @Injectable({ providedIn: 'root' })
-export class BadService {
-  public user$ = new BehaviorSubject<User | null>(null);
+export class UserService {
+  public user$ = new BehaviorSubject<User | null>(null);  // Anyone can call .next()!
 }
 
-// Any component can now do:
-this.badService.user$.next(hackedUser); // Breaks encapsulation!
+// In some component:
+this.userService.user$.next(fakeUser);  // Bypasses service logic
 ```
 
 **Why This Breaks:**
 1. Any component can mutate state directly
-2. No single source of truth
-3. Impossible to debug state changes
+2. Validation logic in service is bypassed
+3. State changes become unpredictable
+4. Debugging becomes nearly impossible
 
 **The Fix:**
 
 ```typescript
-// GOOD - Private subject, public observable
+// GOOD - Private subject, public Observable
 @Injectable({ providedIn: 'root' })
-export class GoodService {
+export class UserService {
   private userSubject = new BehaviorSubject<User | null>(null);
-  public user$ = this.userSubject.asObservable(); // Read-only
+  public user$ = this.userSubject.asObservable();  // Read-only
 
   updateUser(user: User): void {
-    // Controlled state mutation
+    // Validation, logging, side effects happen here
     this.userSubject.next(user);
   }
 }
 ```
 
-## Multi-Value State Pattern
+---
+
+## WARNING: Not Using distinctUntilChanged
+
+**The Problem:**
+
+```typescript
+// BAD - Triggers on every emission, even if value unchanged
+this.playerId$.subscribe(id => {
+  this.loadPlayerData(id);  // Called even when id didn't change
+});
+```
+
+**Why This Breaks:**
+1. Unnecessary API calls
+2. UI flickers from redundant updates
+3. Performance degradation
+
+**The Fix:**
+
+```typescript
+// GOOD - Only triggers on actual changes
+this.playerId$.pipe(
+  distinctUntilChanged(),
+  switchMap(id => this.playerService.getById(id)),
+  takeUntil(this.destroy$)
+).subscribe(player => this.player = player);
+```
+
+---
+
+## Filter State Persistence
 
 ```typescript
 @Injectable({ providedIn: 'root' })
-export class WalletService implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  
-  // Multiple related state values
-  private playerId$ = new BehaviorSubject<number | null>(null);
-  private balance$ = new BehaviorSubject<PlayerBalance | null>(null);
-  private transactions$ = new BehaviorSubject<Transaction[]>([]);
-  
-  // Event stream (not state - use Subject, not BehaviorSubject)
-  private balanceUpdate$ = new Subject<BalanceUpdateEvent>();
+export class FilterStateService {
+  private static readonly STORAGE_KEY = 'casino_filter_state';
 
-  // Combined state for convenience
-  getWalletState(): Observable<WalletState> {
-    return combineLatest([
-      this.playerId$,
-      this.balance$,
-      this.transactions$
-    ]).pipe(
-      map(([playerId, balance, transactions]) => ({
-        playerId,
-        balance,
-        transactions,
-        isLoaded: balance !== null
-      }))
-    );
+  saveFilterState(state: CasinoFilterState): void {
+    try {
+      const cleanState: CasinoFilterState = {};
+      Object.keys(state).forEach(key => {
+        const value = (state as any)[key];
+        if (value !== undefined && value !== null && value !== '') {
+          (cleanState as any)[key] = value;
+        }
+      });
+      sessionStorage.setItem(FilterStateService.STORAGE_KEY, JSON.stringify(cleanState));
+    } catch (error) {
+      console.warn('Failed to save filter state:', error);
+    }
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    // Complete all subjects
-    this.playerId$.complete();
-    this.balance$.complete();
-    this.transactions$.complete();
-    this.balanceUpdate$.complete();
+  loadFilterState(): CasinoFilterState | null {
+    try {
+      const saved = sessionStorage.getItem(FilterStateService.STORAGE_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      console.warn('Failed to load filter state:', error);
+      return null;
+    }
+  }
+
+  clearFilterState(): void {
+    sessionStorage.removeItem(FilterStateService.STORAGE_KEY);
   }
 }
 ```
 
-## Derived State Pattern
+---
+
+## Combining Multiple States
 
 ```typescript
-@Injectable({ providedIn: 'root' })
-export class GameSessionService {
-  private activeSession$ = new BehaviorSubject<GameSession | null>(null);
-  
-  // Derived state using pipe operators
-  hasActiveSession$ = this.activeSession$.pipe(
-    map(session => session !== null)
-  );
-  
-  sessionBalance$ = this.activeSession$.pipe(
-    map(session => session?.balance ?? 0)
-  );
-  
-  // Computed from multiple sources
-  canPlaceBet$ = combineLatest([
-    this.activeSession$,
-    this.walletService.getBalance()
+// In component
+ngOnInit(): void {
+  combineLatest([
+    this.authService.currentUser$,
+    this.walletService.getPlayerBalance(),
+    this.configService.getSettings()
   ]).pipe(
-    map(([session, wallet]) => 
-      session !== null && 
-      wallet !== null && 
-      wallet.realBalance > 0
-    )
-  );
+    takeUntil(this.destroy$)
+  ).subscribe(([user, balance, settings]) => {
+    this.user = user;
+    this.balance = balance;
+    this.settings = settings;
+    this.updateUI();
+  });
 }
 ```
 
-## WebSocket State Updates
+---
+
+## State Reset on Logout
 
 ```typescript
-// Real-time state updates from WebSocket
-@Injectable({ providedIn: 'root' })
-export class RealtimeService implements OnDestroy {
-  private destroy$ = new Subject<void>();
+// AuthService
+logout(): void {
+  // Clear all state
+  this.walletService.clearState();
+  this.profileService.clearState();
+  this.filterStateService.clearFilterState();
   
-  constructor(
-    private wsService: WebSocketService,
-    private walletService: WalletService
-  ) {
-    this.subscribeToUpdates();
-  }
-
-  private subscribeToUpdates(): void {
-    this.wsService.getBalanceUpdates().pipe(
-      takeUntil(this.destroy$)
-    ).subscribe(update => {
-      // Update local state from WebSocket event
-      this.walletService.updateBalance(update.newBalance);
-    });
-  }
+  // Clear tokens
+  sessionStorage.removeItem('access_token');
+  sessionStorage.removeItem('refresh_token');
+  
+  // Update auth state
+  this.currentUserSubject.next(null);
+  this.isAuthenticatedSubject.next(false);
+  
+  // Navigate to login
+  this.router.navigate(['/login']);
 }
 ```
+
+---
+
+## Quick Reference
+
+| Pattern | Use Case | Example |
+|---------|----------|---------|
+| `BehaviorSubject` | State that needs initial value | User, settings, balance |
+| `Subject` | Events without initial value | destroy$, click events |
+| `ReplaySubject(1)` | Late subscribers need last value | One-time data fetch |
+| `AsyncSubject` | Only final value matters | Completion events |

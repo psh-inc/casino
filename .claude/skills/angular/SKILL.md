@@ -1,14 +1,14 @@
 ---
 name: angular
 description: |
-  Angular 17 standalone components, RxJS patterns, reactive forms, and subscription management.
+  Angular 17 standalone components, RxJS patterns, and reactive forms for the casino platform.
   Use when: Building Angular components, services, guards, interceptors, or working with RxJS observables in casino-f or casino-customer-f.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Angular Skill
 
-This project uses Angular 17 with standalone components across both frontends. The customer frontend (`casino-customer-f`) is fully standalone; the admin frontend (`casino-f`) uses a hybrid approach. All components follow strict subscription cleanup with `takeUntil(destroy$)` and use BehaviorSubject-based state management instead of NgRx.
+Angular 17 standalone component patterns for the casino platform's dual-frontend architecture. The customer frontend (`casino-customer-f/`) uses standalone components exclusively, while the admin frontend (`casino-f/`) uses a module-based approach. Both require strict RxJS subscription cleanup with `takeUntil` and use `OnPush` change detection for performance.
 
 ## Quick Start
 
@@ -16,18 +16,25 @@ This project uses Angular 17 with standalone components across both frontends. T
 
 ```typescript
 @Component({
-  selector: 'app-game-card',
+  selector: 'app-player-list',
   standalone: true,
   imports: [CommonModule, RouterModule],
-  templateUrl: './game-card.component.html',
+  templateUrl: './player-list.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class GameCardComponent implements OnDestroy {
+export class PlayerListComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
-  
-  @Input() game!: Game;
-  @Output() playClick = new EventEmitter<void>();
-  
+  players$ = new BehaviorSubject<Player[]>([]);
+
+  constructor(private playerService: PlayerService) {}
+
+  ngOnInit(): void {
+    this.playerService.list().pipe(
+      takeUntil(this.destroy$),
+      map(page => page.content)
+    ).subscribe(players => this.players$.next(players));
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -35,22 +42,31 @@ export class GameCardComponent implements OnDestroy {
 }
 ```
 
-### Service with State
+### Service with State Management
 
 ```typescript
 @Injectable({ providedIn: 'root' })
 export class WalletService implements OnDestroy {
-  private destroy$ = new Subject<void>();
   private balance$ = new BehaviorSubject<PlayerBalance | null>(null);
-  
+  private destroy$ = new Subject<void>();
+
   getBalance(): Observable<PlayerBalance | null> {
     return this.balance$.asObservable();
   }
-  
+
+  refreshBalance(playerId: number): void {
+    this.http.get<PlayerBalance>(`${this.apiUrl}/${playerId}/balance`).pipe(
+      takeUntil(this.destroy$),
+      catchError(error => {
+        console.error('Balance fetch failed:', error);
+        return of(null);
+      })
+    ).subscribe(balance => this.balance$.next(balance));
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
-    this.balance$.complete();
   }
 }
 ```
@@ -59,57 +75,50 @@ export class WalletService implements OnDestroy {
 
 | Concept | Usage | Example |
 |---------|-------|---------|
-| Subscription cleanup | `takeUntil(destroy$)` pattern | All 207+ components |
-| State containers | BehaviorSubject in services | `AuthService`, `WalletService` |
-| Change detection | OnPush for presentational components | `GameCardComponent` |
-| Forms | Reactive forms with FormBuilder | `LoginComponent` |
-| Guards | Functional guards with `inject()` | `authGuard` |
+| Standalone | All new components | `standalone: true` in decorator |
+| Cleanup | Every subscription | `takeUntil(this.destroy$)` |
+| State | Service-level state | `BehaviorSubject<T>` |
+| Performance | List rendering | `trackBy` + `OnPush` |
+| Forms | All user input | Reactive forms with `FormGroup` |
 
 ## Common Patterns
 
-### HTTP Service
+### HTTP with Error Handling
+
+**When:** Any API call
 
 ```typescript
-@Injectable({ providedIn: 'root' })
-export class GameService {
-  private http = inject(HttpClient);
-  private apiUrl = `${environment.apiUrl}/api/v1/games`;
-
-  getGames(page = 0, size = 20): Observable<Page<Game>> {
-    const params = new HttpParams().set('page', page).set('size', size);
-    return this.http.get<Page<Game>>(this.apiUrl, { params }).pipe(
-      catchError(error => {
-        console.error('Failed to fetch games:', error);
-        return throwError(() => error);
-      })
-    );
-  }
-}
+this.http.post<Resource>(this.apiUrl, request).pipe(
+  catchError(error => {
+    console.error('Create failed:', error);
+    return throwError(() => error);
+  })
+);
 ```
 
-### Functional Guard
+### Form with Validation
+
+**When:** User data entry
 
 ```typescript
-export const authGuard: CanActivateFn = (route, state) => {
-  const authService = inject(AuthService);
-  const router = inject(Router);
-  
-  return authService.isAuthenticated$.pipe(
-    map(isAuth => isAuth || router.createUrlTree(['/login']))
-  );
-};
+this.form = this.fb.group({
+  email: ['', [Validators.required, Validators.email]],
+  amount: [null, [Validators.required, Validators.min(0)]]
+});
 ```
 
 ## See Also
 
-- [components](references/components.md)
-- [data-fetching](references/data-fetching.md)
-- [state](references/state.md)
-- [forms](references/forms.md)
-- [performance](references/performance.md)
+- [hooks](references/hooks.md) - Lifecycle hooks and cleanup patterns
+- [components](references/components.md) - Component structure and standalone patterns
+- [data-fetching](references/data-fetching.md) - HTTP services and caching
+- [state](references/state.md) - BehaviorSubject and state management
+- [forms](references/forms.md) - Reactive forms and validation
+- [performance](references/performance.md) - OnPush, trackBy, and optimization
 
 ## Related Skills
 
 - See the **typescript** skill for type definitions and interfaces
-- See the **jasmine** skill for unit testing Angular components
+- See the **spring-boot** skill for backend API patterns
 - See the **playwright** skill for E2E testing
+- See the **frontend-design** skill for CSS and UI patterns

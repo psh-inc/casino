@@ -1,34 +1,93 @@
 ```markdown
-# TypeScript Types
+# TypeScript Types Reference
 
-## Type Definition Patterns
+Type patterns and best practices for the casino platform.
 
-### Interface vs Type Alias
+## String Enums
+
+Always use string-valued enums for API compatibility:
 
 ```typescript
-// GOOD - Use interfaces for object shapes
+// GOOD - String values for backend compatibility
+export enum BonusType {
+  DEPOSIT = 'DEPOSIT',
+  NTH_DEPOSIT = 'NTH_DEPOSIT',
+  NO_DEPOSIT = 'NO_DEPOSIT'
+}
+
+export enum GameStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  MAINTENANCE = 'MAINTENANCE'
+}
+```
+
+### WARNING: Numeric Enums
+
+**The Problem:**
+
+```typescript
+// BAD - Numeric values cause issues
+enum BonusType {
+  DEPOSIT,      // 0
+  NTH_DEPOSIT,  // 1
+  NO_DEPOSIT    // 2
+}
+```
+
+**Why This Breaks:**
+1. Backend expects string values like `"DEPOSIT"`
+2. JSON serializes to numbers, not strings
+3. Debugging is harder - seeing `1` vs `"NTH_DEPOSIT"`
+
+**The Fix:**
+
+```typescript
+// GOOD - Always use string values
+export enum BonusType {
+  DEPOSIT = 'DEPOSIT',
+  NTH_DEPOSIT = 'NTH_DEPOSIT',
+  NO_DEPOSIT = 'NO_DEPOSIT'
+}
+```
+
+## Interface Definitions
+
+### Basic Interface Pattern
+
+```typescript
 export interface Player {
   id: number;
   username: string;
+  email: string;
   status: PlayerStatus;
-  createdAt: string;
+  createdAt: string;             // ISO date string from backend
+  lastLoginAt?: string;          // Optional fields use ?
+  country?: string;
 }
-
-// GOOD - Use type for unions, intersections, computed types
-export type PlayerStatus = 'ACTIVE' | 'PENDING' | 'BLOCKED';
-export type PlayerWithWallet = Player & { wallet: Wallet };
 ```
 
-**When to use which:**
-- `interface`: Objects, DTOs, API responses (can be extended)
-- `type`: Unions, mapped types, complex compositions
-
----
-
-### Generic Page Response Pattern
+### Interface with Nested Objects
 
 ```typescript
-// Reusable pagination interface
+export interface WalletSummary {
+  balance: number;
+  currency: string;
+  bonusBalance: number;
+  wageringRequirement?: {
+    type: 'BONUS' | 'DEPOSIT';   // Inline union type
+    totalRequired: number;
+    totalWagered: number;
+    progressPercentage: number;
+  };
+}
+```
+
+## Generic Interfaces
+
+### Pagination Pattern
+
+```typescript
 export interface Page<T> {
   content: T[];
   totalElements: number;
@@ -41,167 +100,108 @@ export interface Page<T> {
 
 // Usage
 getPlayers(): Observable<Page<Player>> { ... }
-getTransactions(): Observable<Page<Transaction>> { ... }
 ```
 
----
-
-### WARNING: Using `any` for API Responses
-
-**The Problem:**
+### API Response Wrapper
 
 ```typescript
-// BAD - Defeats TypeScript's purpose
-interface ApiResponse {
-  data: any;
-  meta: any;
-}
-```
-
-**Why This Breaks:**
-1. No compile-time validation of property access
-2. Runtime errors surface only in production
-3. Impossible to refactor safely
-
-**The Fix:**
-
-```typescript
-// GOOD - Specific types
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   data: T;
-  meta: PaginationMeta;
-}
-
-interface PaginationMeta {
-  page: number;
-  size: number;
-  totalElements: number;
+  status: 'SUCCESS' | 'ERROR';
+  message?: string;
+  timestamp: string;
 }
 ```
 
----
+## Mapped Types for Labels
 
-### Discriminated Unions for State
+Create display mappings from enums:
 
 ```typescript
-// GOOD - Type-safe state handling
-type LoadingState<T> = 
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'success'; data: T }
-  | { status: 'error'; error: string };
+export const GAME_TYPE_LABELS: Record<GameType, string> = {
+  [GameType.SLOTS]: 'Slots',
+  [GameType.TABLE_GAMES]: 'Table Games',
+  [GameType.LIVE_CASINO]: 'Live Casino',
+  [GameType.VIDEO_POKER]: 'Video Poker'
+};
 
-// Type guard
-function isSuccess<T>(state: LoadingState<T>): state is { status: 'success'; data: T } {
-  return state.status === 'success';
-}
+// Usage in template: {{ GAME_TYPE_LABELS[game.type] }}
 ```
 
----
-
-### Optional Fields for Backward Compatibility
+### With Styling Information
 
 ```typescript
-export interface CampaignListItem {
-  currencyCode?: string;      // Legacy: single currency
-  currencyCodes?: string[];   // New: multiple currencies
-  
-  // Computed helper
-  getCurrencies(): string[] {
-    return this.currencyCodes ?? (this.currencyCode ? [this.currencyCode] : []);
-  }
-}
-```
-
-**Why:** APIs evolve. Optional fields with fallbacks prevent breaking changes.
-
----
-
-### WARNING: Stringly-Typed Code
-
-**The Problem:**
-
-```typescript
-// BAD - Magic strings everywhere
-function getStatusColor(status: string): string {
-  if (status === 'active') return 'green';
-  if (status === 'pending') return 'yellow';
-  return 'gray';
-}
-```
-
-**Why This Breaks:**
-1. No autocomplete for valid values
-2. Typos like `'activ'` fail silently
-3. Backend changes require manual hunting
-
-**The Fix:**
-
-```typescript
-// GOOD - Type-safe enum
-export enum PlayerStatus {
-  ACTIVE = 'ACTIVE',
-  PENDING = 'PENDING'
-}
-
-function getStatusColor(status: PlayerStatus): string {
-  switch (status) {
-    case PlayerStatus.ACTIVE: return 'green';
-    case PlayerStatus.PENDING: return 'yellow';
-  }
-}
-```
-
----
-
-### Utility Types for API Operations
-
-```typescript
-// Pick specific fields for create
-type CreatePlayerRequest = Pick<Player, 'username' | 'email' | 'password'>;
-
-// Omit server-generated fields
-type UpdatePlayerRequest = Omit<Player, 'id' | 'createdAt'>;
-
-// Make all fields optional for patch
-type PatchPlayerRequest = Partial<UpdatePlayerRequest>;
-```
-
----
-
-### Index Signatures with Constraints
-
-```typescript
-// GOOD - Exhaustive enum mapping
-export const STATUS_COLORS: { [K in PlayerStatus]: string } = {
-  [PlayerStatus.ACTIVE]: '#4CAF50',
-  [PlayerStatus.PENDING]: '#FF9800',
-  [PlayerStatus.BLOCKED]: '#F44336'
-  // Compile error if any status is missing
+export const TRANSACTION_TYPE_STYLES: Record<TransactionType, { icon: string; class: string }> = {
+  [TransactionType.DEPOSIT]: { icon: 'add_circle', class: 'success' },
+  [TransactionType.WITHDRAWAL]: { icon: 'remove_circle', class: 'warning' },
+  [TransactionType.GAME_BET]: { icon: 'casino', class: 'info' }
 };
 ```
 
----
+### WARNING: Using `any` for Display Mappings
 
-### Complex Event Types (WebSocket)
+**The Problem:**
 
 ```typescript
-export interface BalanceUpdateEvent {
-  playerId: number;
-  previousBalance: string;  // String for precision
-  newBalance: string;
-  currency: string;
-  changeType: BalanceChangeType;
-  timestamp: string;
-}
+// BAD - No type safety
+const labels: { [key: string]: string } = {
+  SLOTS: 'Slots',
+  TABLE: 'Table Games'
+};
+// Missing keys won't cause compile errors
+```
 
-export enum BalanceChangeType {
+**Why This Breaks:**
+1. No compile-time check for missing enum values
+2. Adding new enum value won't require updating map
+3. Typos in keys go undetected
+
+**The Fix:**
+
+```typescript
+// GOOD - Record<Enum, T> enforces all keys present
+const labels: Record<GameType, string> = {
+  [GameType.SLOTS]: 'Slots',
+  // Compile error if any GameType is missing
+};
+```
+
+## Union Types vs Enums
+
+Use union types for small, inline sets:
+
+```typescript
+// Good for simple, limited options
+type: 'BONUS' | 'DEPOSIT';
+status: 'pending' | 'completed' | 'failed';
+
+// Use enum when shared across files or has many values
+export enum TransactionType {
   DEPOSIT = 'DEPOSIT',
+  WITHDRAWAL = 'WITHDRAWAL',
   GAME_BET = 'GAME_BET',
-  GAME_WIN = 'GAME_WIN',
-  BONUS_AWARD = 'BONUS_AWARD'
+  // ... 15 more values
 }
 ```
 
-See the **kotlin** skill for backend event class alignment.
+## Index Signatures
+
+For dynamic keys like currency-to-amount mappings:
+
+```typescript
+export interface DepositLimits {
+  [currency: string]: {
+    min: number;
+    max: number;
+  };
+}
+
+// Usage
+const limits: DepositLimits = {
+  EUR: { min: 10, max: 5000 },
+  USD: { min: 10, max: 5000 }
+};
+```
+
+See the **jpa** skill for corresponding Kotlin types.
 ```

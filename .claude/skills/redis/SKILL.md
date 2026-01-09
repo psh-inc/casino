@@ -8,35 +8,52 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 
 # Redis Skill
 
-This project implements a sophisticated multi-level caching strategy with Caffeine as L1 (in-memory, sub-millisecond) and Redis as L2 (distributed, cross-instance). Spring Cache abstraction is used for declarative caching with `@Cacheable`, `@CacheEvict`, and `@CachePut` annotations. The architecture prioritizes consistency for financial data (wallet balances) and performance for read-heavy data (games, player profiles).
+This casino platform implements a **three-layer caching strategy**: L1 (Caffeine in-memory) → L2 (Redis distributed) → L3 (Database). Uses Spring Cache abstraction with custom key generators, adaptive TTLs based on player activity, and distributed locking for wallet operations.
 
 ## Quick Start
 
-### Spring Cache Annotations
+### Read-Through Caching with @Cacheable
 
 ```kotlin
-// Read-through caching with @Cacheable
-@Cacheable(value = ["gameDetails"], key = "#gameId")
-fun getGameDetails(gameId: String): GameDetailsResponse {
-    return gameRepository.findById(gameId).orElseThrow()
-}
-
-// Evict on write operations
-@CacheEvict(value = ["gameDetails"], key = "#gameId")
-fun updateGame(gameId: String, request: GameUpdateRequest): GameDetailsResponse {
-    // Update logic - cache automatically invalidated
+// casino-b/src/main/kotlin/com/casino/core/service/PlayerService.kt
+@Cacheable(
+    cacheNames = ["playerDetails"],
+    key = "'player:id:' + #id"
+)
+fun getPlayerById(id: Long): PlayerDetailsResponse {
+    return playerRepository.findById(id)
+        .map(PlayerDetailsResponse::from)
+        .orElseThrow { NotFoundException("Player not found: $id") }
 }
 ```
 
-### Direct Redis Template Operations
+### Cache Invalidation with @CacheEvict
 
 ```kotlin
-// For fine-grained control over TTL and serialization
-fun setBalance(playerId: Long, balance: WalletBalance, isActive: Boolean) {
-    val key = "$WALLET_KEY_PREFIX$playerId"
-    val ttl = if (isActive) activeTtlSeconds else inactiveTtlSeconds
-    val json = objectMapper.writeValueAsString(balance)
-    redisTemplate.opsForValue().set(key, json, Duration.ofSeconds(ttl))
+// casino-b/src/main/kotlin/com/casino/core/service/CurrencyService.kt
+@CacheEvict(value = ["currencies", "active-currencies"], allEntries = true)
+fun createCurrency(request: CreateCurrencyRequest): CurrencyDto {
+    val currency = Currency(code = request.code, name = request.name)
+    return CurrencyDto.from(currencyRepository.save(currency))
+}
+```
+
+### Multi-Level Cache Lookup
+
+```kotlin
+// casino-b/src/main/kotlin/com/casino/core/service/cache/PlayerCacheService.kt
+fun getPlayer(playerId: Long): CachedPlayer? {
+    // L1: Caffeine local cache
+    localCache.getIfPresent(playerId)?.let { return it }
+    
+    // L2: Redis distributed cache
+    redisTemplate.opsForValue().get("player:$playerId")?.let { 
+        localCache.put(playerId, it)  // Promote to L1
+        return it
+    }
+    
+    // L3: Database fallback
+    return playerRepository.findById(playerId).orElse(null)
 }
 ```
 
@@ -44,53 +61,66 @@ fun setBalance(playerId: Long, balance: WalletBalance, isActive: Boolean) {
 
 | Concept | Usage | Example |
 |---------|-------|---------|
-| Multi-level cache | Caffeine (L1) → Redis (L2) → DB | `CompositeCacheManager` |
-| Dynamic TTL | Active players: 30s, Inactive: 300s | `DistributedWalletCache` |
-| Key patterns | `domain:type:id` format | `player:cache:123` |
-| Bulk operations | `multiGet`/`multiSet` for batching | `getBalances(playerIds)` |
-| Distributed locks | `setIfAbsent` for mutex | `tryAcquireLock(playerId)` |
+| L1 Cache | In-memory Caffeine, 5s-30min TTL | `localCache.getIfPresent(key)` |
+| L2 Cache | Redis distributed, 30s-2h TTL | `redisTemplate.opsForValue().get()` |
+| Key Generation | SpEL with @cacheKeys bean | `key = "@cacheKeys.playerStats(#id)"` |
+| Adaptive TTL | Active players: 30s, Inactive: 300s | Wallet balance caching |
+| Distributed Lock | Redis SETNX for wallet ops | `setIfAbsent(key, value, duration)` |
 
 ## Common Patterns
 
-### Cache-Aside with Fallback
+### SpEL Key Generation with Custom Bean
 
-**When:** Reading data that may not be in cache
+**When:** Complex key patterns needed across multiple services
 
 ```kotlin
-fun getPlayer(playerId: Long): CachedPlayer? {
-    // L1: Local cache
-    localCache.getIfPresent(playerId)?.let { return it }
-    
-    // L2: Redis cache
-    redisTemplate.opsForValue().get(redisKey)?.let { 
-        localCache.put(playerId, it)  // Populate L1
-        return it 
-    }
-    
-    // L3: Database
-    return playerRepository.findById(playerId).orElse(null)?.let { player ->
-        populateCaches(playerId, CachedPlayer.from(player))
-    }
+// casino-b/src/main/kotlin/com/casino/core/cache/CacheKeyGenerator.kt
+@Component("cacheKeys")
+class CacheKeys {
+    fun playerStats(playerId: Long, currency: String) = "player:stats:$playerId:$currency"
+    fun playerPattern(playerId: Long) = "player:*:$playerId:*"
+}
+
+// Usage in service
+@Cacheable(
+    cacheNames = ["playerStatistics"],
+    key = "@cacheKeys.playerStatsPeriod(#playerId, #currency, #periodType.name())"
+)
+fun getPlayerStatistics(playerId: Long, currency: String, periodType: StatisticsPeriodType)
+```
+
+### Adaptive TTL Based on Activity
+
+**When:** Hot data needs shorter TTL for freshness
+
+```kotlin
+// casino-b/src/main/kotlin/com/casino/core/service/cache/DistributedWalletCache.kt
+fun setBalance(playerId: Long, balance: WalletBalance, isActive: Boolean) {
+    val ttl = if (isActive) activeTtl else inactiveTtl  // 30s vs 300s
+    redisTemplate.opsForValue().set(
+        "wallet:balance:$playerId",
+        balance,
+        ttl
+    )
 }
 ```
 
-### Bulk Eviction on Write
+## TTL Reference
 
-**When:** Write affects multiple cache entries
-
-```kotlin
-@CacheEvict(
-    value = ["games", "gameDetails", "featuredGames", "popularGames"],
-    allEntries = true
-)
-fun bulkUpdateGames(): BulkUpdateResponse { ... }
-```
+| Cache | L1 TTL | L2 TTL | Use Case |
+|-------|--------|--------|----------|
+| walletBalance | 5s | 30s/300s | Real-time balance |
+| playerProfile | - | 5 min | Player details |
+| games | - | 15 min | Game catalog |
+| verificationLevels | 30 min | 2 hours | KYC config |
 
 ## See Also
 
-- [patterns](references/patterns.md)
-- [workflows](references/workflows.md)
+- [patterns](references/patterns.md) - Caching patterns and anti-patterns
+- [workflows](references/workflows.md) - Cache warming, invalidation, monitoring
 
 ## Related Skills
 
-For Kotlin patterns, see the **kotlin** skill. For Spring Boot configuration, see the **spring-boot** skill. For JPA repository patterns, see the **jpa** skill.
+- See the **spring-boot** skill for service configuration
+- See the **kotlin** skill for Kotlin-specific patterns
+- See the **jpa** skill for database fallback patterns
