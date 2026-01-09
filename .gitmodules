@@ -1,0 +1,9 @@
+[submodule "casino-b"]
+	path = casino-b
+	url = git@github.com:psh-inc/core.git
+[submodule "casino-f"]
+	path = casino-f
+	url = git@github.com:psh-inc/cadmin.git
+[submodule "casino-customer-f"]
+	path = casino-customer-f
+	url = git@github.com:psh-inc/casino-customer-f.git
