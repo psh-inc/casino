@@ -83,6 +83,97 @@ Returns integration status plus recent sync logs.
 ### POST /refresh-activities
 Triggers a refresh of the Cellxpert activity materialized view (ADMIN only).
 
+## Admin Endpoints
+
+Base path: `/api/v1/admin/cellxpert`
+
+- `GET /config` -> returns `CellxpertConfig`
+- `PUT /config` -> updates `CellxpertConfig` from `CellxpertConfigRequest`
+- `GET /players` -> paginated list of tracked players
+- `GET /players/by-token/{token}` -> player lookup by Cellxpert token
+- `GET /activity/sync` -> activity sync payload with summary metadata
+- `POST /refresh-view` -> refreshes materialized view
+
+## Schemas (Code-Derived)
+
+### CellxpertPlayerResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| player_id | number | player id |
+| CXD | string | Cellxpert tracking token |
+| AffId | string? | affiliate id |
+| Status | string? | player status |
+| RegistrationDate | string | ISO date-time |
+| LastModifiedDate | string | ISO date-time |
+| ISOCountry | string | ISO country code |
+| UserIPAddress | string? | optional |
+| FirstDepositDate | string? | ISO date-time |
+| FirstDepositAmount | number? | optional |
+| FirstDepositCurrency | string? | optional |
+| TotalDepositAmount | number? | optional |
+| DepositCount | number? | optional |
+| TotalWithdrawalAmount | number? | optional |
+| WithdrawalCount | number? | optional |
+| NetDeposit | number? | optional |
+| PrimaryCurrency | string? | optional |
+
+### CellxpertTransactionResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| player_id | number | player id |
+| transaction_id | string | transaction id |
+| transaction_Date | string | ISO date-time (note capital D) |
+| transaction_type | string | Deposit/Withdrawal/Adjustment/etc |
+| transaction_amount | number | signed amount |
+| transaction_currency | string | currency code |
+
+### CellxpertActivityResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| player_id | number | player id |
+| activity_date | string | YYYY-MM-DD |
+| bets | number | total bets |
+| bonus | number | bonus amount |
+| revenue | number | GGR |
+| stake | number | total stake |
+| activity_currency | string | currency code |
+
+### Health Response (GET /health)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| status | string | UP |
+| integration | string | integration name |
+| recentSyncs | array | list of {type, time, records, status} |
+| recentFailures | array | list of {type, time, error} |
+
+### CellxpertConfigRequest
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| parameterName | string | default "cxd" |
+| affiliateParamName | string? | default "affid" |
+| apiEnabled | boolean | true/false |
+| apiKeyHash | string? | SHA-256 hash |
+| syncIntervalMinutes | number | min 1 |
+
+### CellxpertConfig
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| id | number | config id |
+| parameterName | string | query param name |
+| affiliateParamName | string? | affiliate param name |
+| apiEnabled | boolean | enabled flag |
+| apiKeyHash | string? | stored hash |
+| lastSyncTimestamp | string? | ISO date-time |
+| syncIntervalMinutes | number | sync interval |
+| createdAt | string | ISO date-time |
+| updatedAt | string | ISO date-time |
+
 ## Sync Logging
 
 `CellxpertSyncLog` tracks syncs with:

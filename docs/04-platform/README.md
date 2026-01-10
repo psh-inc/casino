@@ -28,6 +28,14 @@ No legacy documentation was used as a source. Each section references the specif
 - `other-modules.md` - additional modules and endpoints inventory
 - `module-inventory.md` - full component inventory by module and package
 
+## Coverage Map (All Modules/Controllers)
+
+Use these references for complete coverage:
+- `contracts-map.md` - every HTTP endpoint grouped by controller and tag.
+- `module-inventory.md` - exhaustive list of backend packages and controllers.
+- `../specs/openapi/*` - request/response schemas for REST APIs.
+- `../specs/asyncapi/*` - event schemas for Kafka and async flows.
+
 ## Submodule Deep Dives (Mirrored)
 
 These references point to deep dives that originally lived inside submodules and

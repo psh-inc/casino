@@ -50,6 +50,53 @@ Errors:
 - `NotFoundException` -> 404.
 - Generic errors -> 500.
 
+### Bonus Schemas (Code-Derived)
+
+#### ActivateBonusRequest
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| bonusId | number | required |
+| userId | number | required |
+| amount | number | required, > 0 |
+
+#### ActivateBonusResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| success | boolean | true on success |
+| message | string | human-readable |
+| awardId | number? | bonus award id |
+| playerId | number | player id |
+| bonusId | number | bonus id |
+| bonusName | string | bonus name |
+| awardedAmount | number | amount awarded |
+| currency | string | currency code |
+| wageringRequirement | number? | optional |
+| expiresAt | string? | ISO date-time |
+| depositedToRealBalance | boolean | true for zero-wagering bonuses |
+
+#### ActiveBonusListResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| bonuses | array | list of SimpleBonusInfo |
+
+#### SimpleBonusInfo
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| bonusId | number | bonus id |
+| bonusName | string | bonus name |
+
+#### ErrorResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| success | boolean | false |
+| message | string | error message |
+| error | string | error code |
+
 ## Smartico Games Endpoint
 
 Base path: `/api/v1/integration/smartico`
@@ -60,6 +107,28 @@ Base path: `/api/v1/integration/smartico`
 - Builds front-end link as `${spring.frontend.url}/game/{gameId}`.
 - Returns empty list if cache not loaded.
 - Adds cache headers (`Cache-Control: public, max-age=600`) and response metadata headers.
+
+### Game Schema (Code-Derived)
+
+#### SmarticoGameResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| id | string | game id |
+| name | string | game name |
+| link | string | frontend URL |
+| image | string? | thumbnail URL |
+| enabled | boolean | true for active games |
+| game_categories | array | list of SmarticoGameCategoryResponse |
+| game_provider | string | provider/vendor name |
+| game_provider_id | number? | vendor id |
+
+#### SmarticoGameCategoryResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| id | number | category id |
+| name | string | category name |
 
 ## CRM Event Publishing (Overview)
 
