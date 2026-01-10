@@ -28,6 +28,14 @@ Supporting docs:
 - ../epics/README.md - delivery backlog and sprint planning
 - ../AGENT.md - AI agent operational guide
 
+Submodule docs (mirrored into root docs):
+- submodules/casino-b/api/WALLET_API.md - Wallet API documentation
+- submodules/casino-b/api/admin-bonus-award-wagering-transactions.md - Admin bonus award wagering transactions
+- submodules/casino-b/api/betby-sports-bonus-integration.md - BetBy sports bonus integration
+- submodules/casino-b/reporting-analytics.md - Reporting and analytics deep dive
+- submodules/casino-f/platform-admin-panel.md - Admin panel deep dive
+- submodules/casino-customer-f/platform-customer-frontend.md - Customer frontend deep dive
+
 Principles:
 - Prefer links to authoritative sources and code locations over duplication.
 - Avoid secrets and environment values in docs; use variable names only.

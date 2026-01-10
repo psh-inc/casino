@@ -59,12 +59,13 @@ Required headers:
 - `X-Authorization` matches expected hash for the command.
 
 Hash logic (`ProviderSecurityService`):
-- Authorization hash: `SHA1(command + secretKey)` or `SHA1(command + operatorId + secretKey)`
+- Authorization hash: `SHA1(command + secretKey)` in the current controller path.
+- A `SHA1(command + operatorId + secretKey)` variant exists but is not used by `ProviderCallbackController` (includeOperatorId=false).
 - Request hash: `SHA1(command + request_timestamp + secretKey)`
 - Response hash: `SHA1(status + response_timestamp + secretKey)`
 
 Implementation detail:
-- `validateAuthorizationHeader` and `validateRequestHash` currently return `true` unconditionally. Hashes are logged but not enforced.
+- `validateAuthorizationHeader` and `validateRequestHash` log mismatches but currently return `true`. Only header presence and operatorId match are enforced.
 
 ## Business Logic by Endpoint
 
@@ -148,6 +149,254 @@ Bonus wagering:
   - BONUS_ONLY: bonus portion
   - DEPOSIT_PLUS_BONUS: full bet
 
+## Sequence Diagrams
+
+### Change Balance (BET -> WIN)
+
+```mermaid
+sequenceDiagram
+    participant GP as Game Provider
+    participant B as Backend
+    participant PIS as ProviderIntegrationService
+    participant IDEM as ProviderTransactionRepository
+    participant HPW as HighPerformanceWalletService
+    participant BW as Bonus/Wagering
+    participant GR as GameRoundRepository
+    participant WD as WinDistributionService
+
+    GP->>B: POST /api/v1/provider/{provider}/changebalance (BET)
+    B->>PIS: changeBalance()
+    PIS->>IDEM: findByProviderTransactionId + requestHash
+    alt duplicate
+        IDEM-->>PIS: existing response
+        PIS-->>GP: cached balance
+    else new bet
+        PIS->>HPW: getBalance + getActiveBonusForWagering
+        note over PIS: Split bet: real first\nbonus = bet - real
+        PIS->>GR: findOrCreateGameRound + store bet split
+        PIS->>HPW: updateBalance(-real, GAME_BET)
+        PIS->>HPW: updateBonusBalance(DEBIT, bonus)
+        PIS->>BW: updateDepositWageringProgress(real)
+        PIS->>BW: updateBonusWagering(mode-based)
+        PIS-->>GP: balance (real + playable bonus)
+    end
+
+    GP->>B: POST /api/v1/provider/{provider}/changebalance (WIN)
+    B->>PIS: changeBalance()
+    PIS->>IDEM: findByProviderTransactionId + requestHash
+    alt duplicate
+        IDEM-->>PIS: existing response
+        PIS-->>GP: cached balance
+    else new win
+        PIS->>GR: load bet split
+        PIS->>WD: calculateProportionalDistribution()
+        PIS->>HPW: updateBalance(+realWin, GAME_WIN)
+        alt bonusWin > 0 and active bonus
+            PIS->>HPW: updateBonusBalance(CREDIT, bonusWin)
+            alt bonus credit fails
+                PIS->>HPW: updateBalance(+bonusWin, GAME_WIN)\n(fallback)
+            end
+        else no active bonus
+            PIS->>HPW: updateBalance(+bonusWin, GAME_WIN)
+        end
+        PIS->>BW: checkAndCompleteWageringIfNeeded
+        PIS-->>GP: balance (real + playable bonus)
+    end
+```
+
+### Authenticate + Balance
+
+```mermaid
+sequenceDiagram
+    participant GP as Game Provider
+    participant B as Backend
+    participant PIS as ProviderIntegrationService
+    participant HPW as HighPerformanceWalletService
+
+    GP->>B: POST /api/v1/provider/{provider}/authenticate
+    B->>PIS: authenticate()
+    PIS->>HPW: getBalance + getBonusBalance
+    PIS-->>GP: user + balances
+
+    GP->>B: POST /api/v1/provider/{provider}/balance
+    B->>PIS: getBalance()
+    PIS->>HPW: getBalance + getBonusBalance
+    PIS-->>GP: combined balance
+```
+
+### Cancel Transaction
+
+```mermaid
+sequenceDiagram
+    participant GP as Game Provider
+    participant B as Backend
+    participant PIS as ProviderIntegrationService
+    participant IDEM as ProviderTransactionRepository
+    participant HPW as HighPerformanceWalletService
+
+    GP->>B: POST /api/v1/provider/{provider}/cancel
+    B->>PIS: cancelTransaction()
+    PIS->>IDEM: find transaction
+    alt missing transaction
+        PIS-->>GP: CANCELED (idempotent)
+    else OK transaction
+        PIS->>HPW: updateBalance(reversal, ADJUSTMENT)
+        PIS->>IDEM: mark CANCELED
+        PIS-->>GP: CANCELED
+    end
+```
+
+### Finish Round
+
+```mermaid
+sequenceDiagram
+    participant GP as Game Provider
+    participant B as Backend
+    participant PIS as ProviderIntegrationService
+    participant GR as GameRoundRepository
+
+    GP->>B: POST /api/v1/provider/{provider}/finishround
+    B->>PIS: finishRound()
+    PIS->>GR: load round by roundId
+    alt round already completed
+        PIS-->>GP: OK (idempotent)
+    else complete round
+        PIS->>GR: update round status COMPLETED\nupdate betType if win
+        PIS-->>GP: OK
+    end
+```
+
+## Request/Response Schemas (Code-Derived)
+
+### ProviderApiRequest
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| command | string | command name (authenticate/balance/changebalance/status/cancel/finishround) |
+| request_timestamp | string | request timestamp from provider |
+| hash | string | request hash used for idempotency + auth validation |
+| data | object | command-specific payload |
+
+### ProviderApiResponse
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| status | string | OK or ERROR |
+| response_timestamp | string | timestamp generated by backend |
+| hash | string | response hash |
+| data | object | response payload or error payload |
+
+### ChangeBalance Request (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| token | string? | required for BET unless PROMO-FREESPIN; optional for WIN/REFUND |
+| user_id | string | required, max 70 chars (player id as string) |
+| transaction_type | string | BET / WIN / REFUND |
+| transaction_id | number | required, positive |
+| round_id | number | required, positive |
+| round_finished | boolean? | optional |
+| game_id | number | required, max 6 digits |
+| currency_code | string | required, max 4 chars |
+| amount | number | required, non-negative |
+| transaction_timestamp | string | required, timestamp string |
+| context | object? | promo free spin + campaign context |
+
+### ChangeBalance Response (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| balance | number | real + playable bonus balance |
+| currency_code | string | wallet currency |
+
+### Authenticate Request (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| token | string | required, 20-50 chars, alphanumeric only |
+
+### Authenticate Response (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| user_id | string | provider user id |
+| user_name | string | username |
+| user_country | string | ISO country code |
+| display_name | string? | optional display name |
+| group | string? | optional group |
+| currency_code | string | wallet currency |
+| balance | number | real + playable bonus balance |
+
+### Balance Request (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| token | string | required, max 50 chars |
+| currency_code | string | required, max 4 chars |
+| user_id | string | required, max 70 chars |
+
+### Balance Response (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| balance | number | real + playable bonus balance |
+| currency_code | string | wallet currency |
+
+### Cancel Request (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| user_id | string | required, max 70 chars |
+| transaction_id | number | required, positive |
+| round_id | number | required, positive |
+| round_finished | boolean? | optional |
+| game_id | number | required, max 6 digits |
+
+### Cancel Response (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| user_id | string | provider user id |
+| transaction_id | number | provider transaction id |
+| transaction_status | string | CANCELED |
+
+### Status Request (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| user_id | string | required, max 70 chars |
+| transaction_id | number | required, positive |
+| transaction_type | string | BET / WIN / REFUND |
+| transaction_date | string | timestamp string |
+| transaction_ts | string | 13-digit epoch string |
+| round_id | number | required, positive |
+
+### Status Response (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| user_id | string | provider user id |
+| transaction_id | number | provider transaction id |
+| transaction_status | string | OK / ERROR / CANCELED |
+
+### FinishRound Request (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| round_id | number | required, positive |
+| user_id | string | required, max 70 chars |
+| game_id | number | required, max 6 digits |
+| round_date | string | timestamp string |
+| round_ts | string | 13-digit epoch string |
+
+### FinishRound Response (data)
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| round_id | number | round id |
+| user_id | string | provider user id |
+| game_id | number | game id |
+
 ## Provider Sync (Game List)
 
 `GameProviderSyncService`:
@@ -160,4 +409,3 @@ Bonus wagering:
 
 - Provider callbacks are logged by `GameCallbackLoggingFilter`.
 - Sync history is stored in `GameProviderSyncHistory`.
-

@@ -28,6 +28,19 @@ No legacy documentation was used as a source. Each section references the specif
 - `other-modules.md` - additional modules and endpoints inventory
 - `module-inventory.md` - full component inventory by module and package
 
+## Submodule Deep Dives (Mirrored)
+
+These references point to deep dives that originally lived inside submodules and
+are now mirrored in `docs/submodules/`.
+
+- `../submodules/README.md` - submodule documentation index
+- `../submodules/casino-b/api/WALLET_API.md` - wallet API details
+- `../submodules/casino-b/api/admin-bonus-award-wagering-transactions.md` - admin bonus award wagering transactions
+- `../submodules/casino-b/api/betby-sports-bonus-integration.md` - BetBy sports bonus integration
+- `../submodules/casino-b/reporting-analytics.md` - reporting and analytics deep dive
+- `../submodules/casino-f/platform-admin-panel.md` - admin panel deep dive
+- `../submodules/casino-customer-f/platform-customer-frontend.md` - customer frontend deep dive
+
 ## Source of Truth (Code)
 
 - Backend core: `casino-b/src/main/kotlin/com/casino/core`

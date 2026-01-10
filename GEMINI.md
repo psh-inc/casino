@@ -65,6 +65,6 @@
     *   `[UI] Update dashboard layout`
 
 ## Documentation
-*   **API**: `casino-b/docs/api/`
+*   **API**: `docs/submodules/casino-b/api/`
 *   **Deployment**: `DEPLOYMENT.md`
 *   **Guidelines**: `CLAUDE.md` (Detailed reference)

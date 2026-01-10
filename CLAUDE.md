@@ -23,7 +23,7 @@ An enterprise-grade online casino platform with player management, wallet system
 4. **NEVER** store passwords unhashed (use BCrypt/Argon2)
 5. **ALWAYS** use `BigDecimal` from String: `BigDecimal("123.45")` (never from double)
 6. **ALWAYS** use `TIMESTAMP WITH TIME ZONE` for dates in PostgreSQL
-7. **ALWAYS** document API changes in `casino-b/docs/api/`
+7. **ALWAYS** document API changes in `docs/submodules/casino-b/api/`
 8. **ALWAYS** use parameterized queries via JPA (never string concatenation)
 
 ## Monorepo Setup

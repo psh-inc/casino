@@ -171,6 +171,85 @@ Cache updates are written immediately after atomic updates instead of invalidati
 - Publishes `BonusBalanceUpdateEvent` and `CombinedBalanceUpdateEvent`.
 - Invalidates bonus cache after updates.
 
+## High-Performance Wallet Interaction Coverage
+
+This section summarizes how the high-performance wallet is used across betting, change-balance callbacks, payments, and wagering.
+
+### Change-Balance (Provider Callbacks)
+
+- `ProviderCallbackController` exposes `/api/v1/provider/{provider}/changebalance` and delegates to `ProviderIntegrationService.changeBalance()` (see `casino-b/src/main/kotlin/com/casino/core/controller/ProviderCallbackController.kt`).
+- `ProviderIntegrationService.changeBalance()`:
+  - Reads cached balance via `HighPerformanceWalletService.getBalance()` for currency validation.
+  - Routes `BET`, `WIN`, `REFUND` to `processBetTransactionCached`, `processWinTransactionCached`, `processRefundTransactionCached`.
+  - Each path uses `HighPerformanceWalletService.updateBalance()` for real-money ledger updates and `updateBonusBalance()` when bonus funds are involved.
+  - Provider idempotency is tracked in `ProviderTransaction` with `originalRequestHash` (see `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`).
+- `ProviderCallbackController.cancelTransaction()` reverses transactions by calling `HighPerformanceWalletService.updateBalance()` with `TransactionType.ADJUSTMENT`.
+
+### Betting (Games and Sports)
+
+- Game provider callbacks:
+  - `GameCallbackService` applies real and bonus splits and calls `HighPerformanceWalletService.updateBalance()` and `updateBonusBalance()` for GAME_BET/GAME_WIN flows.
+  - `ProviderIntegrationService` drives the primary change-balance flow for providers and uses the same high-performance wallet path.
+- Sports betting:
+  - `BetByWalletService` uses `HighPerformanceWalletService.updateBalance()` for SPORTS_BET, SPORTS_WIN, SPORTS_REFUND, SPORTS_ROLLBACK, and SPORTS_CASHOUT.
+
+### Payment Services and Cache Synchronization
+
+- Payments and admin operations use `WalletService` (not `HighPerformanceWalletService`) for deposits, withdrawals, and adjustments.
+- `WalletService` invalidates the high-performance wallet caches after credit/debit to keep game-time reads consistent (`invalidateWalletCache`, OCP-615).
+- `PaymentWebhookService` maps payment status transitions to `WalletService.processDeposit()` / withdrawal completion and links `PaymentTransaction` to `Transaction`.
+
+### Wagering Synchronization
+
+- Deposit wagering progress is updated on real-money bets via `ProviderIntegrationService.updateDepositWageringProgress()` and `DepositWageringService.updateWageringProgress()`.
+- Bonus wagering progress is updated by:
+  - `HighPerformanceWalletService.updateBonusWagering()` during provider callbacks.
+  - `WageringService.processGameRoundWagering()` on `GameRoundCompletedEvent`.
+- `HighPerformanceWalletService` auto-closes deposit wagering when real balance falls below `0.10` and publishes wagering events.
+
+### Interaction Diagram
+
+```mermaid
+flowchart LR
+    subgraph ProviderChangeBalance[Provider changebalance]
+        GP[Game Provider] --> PCC[ProviderCallbackController]
+        PCC --> PIS[ProviderIntegrationService]
+        PIS --> IDEM[Idempotency check\nProviderTransactionRepository\noriginalRequestHash]
+        IDEM -->|duplicate| RESP[Return cached balance]
+        IDEM -->|new tx| SPLIT[Bonus/real split\nWinDistributionService]
+        SPLIT --> HPW[HighPerformanceWalletService.updateBalance]
+        SPLIT --> HPB[HighPerformanceWalletService.updateBonusBalance]
+        PIS -->|deposit wagering progress| DW[DepositWageringService]
+        PIS -->|bonus wagering progress| BWS[Bonus/Wagering Services]
+        HPB --> BWS
+    end
+
+    subgraph SportsBetting[BetBy sports]
+        SB[BetBy] --> BW[BetByWalletService]
+        BW --> HPW
+    end
+
+    subgraph Payments[Payment webhooks]
+        PP[Payment Provider] --> PWH[PaymentWebhookService]
+        PWH --> PST[PaymentStatusTransitionService]
+        PWH --> PTR[PaymentTransactionRepository]
+        PWH --> WS[WalletService]
+        WS -->|ledger write| WALLET_DB[WalletRepository]
+        WS -->|ledger write| TX_DB[TransactionRepository]
+        WS -->|invalidate| CACHE_INVALIDATION[Wallet cache invalidation]
+    end
+
+    subgraph CacheLayers[Wallet cache layers]
+        HPW --> L1[L1 Caffeine cache]
+        HPW --> L2[L2 Redis DistributedWalletCache]
+        HPW --> B_CACHE[Bonus balance cache]
+        HPW --> EVENTS[Balance events/WebSocket]
+    end
+
+    HPW --> WALLET_DB
+    HPW --> TX_DB
+```
+
 ## Withdrawable Balance and Locked Funds
 
 `WithdrawableBalanceCalculator`:
@@ -313,6 +392,61 @@ sequenceDiagram
     B-->>GP: balance (real + bonus)
 ```
 
+### BET -> WIN (Idempotency + Bonus Split)
+
+```mermaid
+sequenceDiagram
+    participant GP as Game Provider
+    participant B as Backend
+    participant PIS as ProviderIntegrationService
+    participant IDEM as ProviderTransactionRepository
+    participant HPW as HighPerformanceWalletService
+    participant GR as GameRoundRepository
+    participant WD as WinDistributionService
+    participant DW as DepositWageringService
+    participant BW as Bonus/Wagering
+
+    GP->>B: changebalance (BET)
+    B->>PIS: changeBalance()
+    PIS->>IDEM: findByProviderTransactionId + requestHash
+    alt duplicate tx + same hash
+        IDEM-->>PIS: existing response
+        PIS-->>GP: return cached balance
+    else new transaction
+        PIS->>HPW: getBalance + getActiveBonusForWagering
+        note over PIS: Split bet: real first\nbonus = bet - real
+        PIS->>GR: findOrCreateGameRound + store bet split
+        PIS->>HPW: updateBalance(-real, GAME_BET)
+        PIS->>HPW: updateBonusBalance(DEBIT, bonus)
+        PIS->>DW: updateDepositWageringProgress(real only)
+        PIS->>BW: updateBonusWagering (mode-based)
+        PIS-->>GP: balance = real + playable bonus
+    end
+
+    GP->>B: changebalance (WIN)
+    B->>PIS: changeBalance()
+    PIS->>IDEM: findByProviderTransactionId + requestHash
+    alt duplicate tx + same hash
+        IDEM-->>PIS: existing response
+        PIS-->>GP: return cached balance
+    else new transaction
+        PIS->>GR: load bet split
+        PIS->>WD: calculateProportionalDistribution(realBet, bonusBet)
+        note over WD: realWin = win * realBet/total\nbonusWin = win * bonusBet/total
+        PIS->>HPW: updateBalance(+realWin, GAME_WIN)
+        alt bonusWin > 0 and active bonus
+            PIS->>HPW: updateBonusBalance(CREDIT, bonusWin)
+            alt bonus credit fails
+                PIS->>HPW: updateBalance(+bonusWin, GAME_WIN)\n(fallback)
+            end
+        else no active bonus
+            PIS->>HPW: updateBalance(+bonusWin, GAME_WIN)
+        end
+        PIS->>BW: checkAndCompleteWageringIfNeeded
+        PIS-->>GP: balance = real + playable bonus
+    end
+```
+
 ### Sports Bet + Settlement (BetBy)
 
 ```mermaid
@@ -356,4 +490,3 @@ sequenceDiagram
 - Provider callbacks are idempotent by provider transaction ID + request hash.
 - Payment webhooks deduplicate COMPLETED events by checking status.
 - Deposit wagering avoids duplicate rounds by `gameRoundId`.
-

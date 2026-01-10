@@ -116,7 +116,7 @@ docker-compose logs -f
 
 ## API Documentation
 
-- [Wallet API Documentation](casino-b/docs/api/WALLET_API.md)
+- [Wallet API Documentation](docs/submodules/casino-b/api/WALLET_API.md)
 - [Swagger UI](http://localhost:8080/swagger-ui.html) (when running)
 
 ### Key API Endpoints

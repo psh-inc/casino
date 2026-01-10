@@ -12,6 +12,7 @@ This document lists external provider integrations and the concrete protocols im
 | Campaigns API (Free Spins) | Outbound | SHA1 + X-Operator-Id | HTTP JSON | `casino-b/src/main/kotlin/com/casino/core/campaigns/client/CampaignsApiClient.kt` |
 | Payment Provider (Cashier) | Outbound + Inbound | Bearer token + webhook signature | HTTP JSON | `casino-b/src/main/kotlin/com/casino/core/service/PaymentProviderService.kt` |
 | Payment Webhook (Legacy) | Inbound | None in controller | HTTP JSON | `casino-b/src/main/kotlin/com/casino/core/controller/PaymentWebhookController.kt` |
+| Payment Balance (Legacy) | Inbound | None in controller | HTTP JSON | `casino-b/src/main/kotlin/com/casino/core/controller/PaymentWebhookController.kt` |
 | Smartico CRM | Inbound + Kafka | API key header + Kafka events | HTTP JSON + Kafka | `casino-b/src/main/kotlin/com/casino/core/controller/integration/SmarticoController.kt` |
 | Cellxpert Affiliate | Inbound | API key header (SHA-256 hash) | HTTP JSON | `casino-b/src/main/kotlin/com/casino/core/controller/CellxpertController.kt` |
 | BetBy Sports API | Inbound | JWT payload | HTTP JSON | `casino-b/src/main/kotlin/com/casino/core/sports/controller/BetByController.kt` |
@@ -42,15 +43,16 @@ Headers:
 - `X-Authorization` must match SHA1 of command with secret (see below).
 
 Hashing rules in `ProviderSecurityService`:
-- Authorization hash: `SHA1(command + operatorId + secretKey)`
+- Authorization hash: `SHA1(command + secretKey)` in the current controller path.
+- A `SHA1(command + operatorId + secretKey)` variant exists but is not used by `ProviderCallbackController`.
 - Request hash: `SHA1(command + request_timestamp + secretKey)`
 - Response hash: `SHA1(status + response_timestamp + secretKey)`
 
 Security note:
-- `validateAuthorizationHeader()` and `validateRequestHash()` currently return `true` regardless of input. Hash values are logged but not enforced.
+- `validateAuthorizationHeader()` and `validateRequestHash()` log mismatches but return `true`. Only header presence and operatorId match are enforced.
 
 Key payloads:
-- `ProviderChangeBalanceRequestData` includes `token`, `user_id`, `transaction_type`, `transaction_id`, `round_id`, `game_id`, `currency_code`, `amount`, `context`.
+- `ProviderChangeBalanceRequestData` includes `token`, `user_id`, `transaction_type`, `transaction_id`, `round_id`, `round_finished`, `game_id`, `currency_code`, `amount`, `transaction_timestamp`, `context`.
 - `context` may include `campaign_code` and `reason` (used for PROMO-FREESPIN).
 
 ## Game Provider Callbacks (Inbound)
@@ -118,12 +120,14 @@ Inbound webhook in `CashierWebhookController`:
 - `POST /api/payment/cashier/hook`
 - Headers: `x-webhook-signature`, `x-webhook-request-id`, `x-webhook-timestamp`
 - Signature: HMAC-SHA256 over `timestamp + requestId + body` (see `WebhookSignatureService`)
+- Signature mismatches are logged, but requests are still processed.
 
 ## Payment Webhook (Legacy)
 
 Inbound in `PaymentWebhookController`:
 - `POST /api/payment/hook` expects `type` in `payment.successful|payment.failed|payment.cancelled`.
 - Creates deposit transactions on success.
+- `GET /api/payment/player/balance` returns wallet balance for `customerId` (no auth in controller).
 
 ## Smartico CRM
 

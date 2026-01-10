@@ -42,12 +42,12 @@ Endpoints (each accepts `{ "payload": "<jwt>" }`):
 - `POST /player-segment` and `/player_segment` -> PLAYER_SEGMENT
 - `POST /status` -> STATUS
 
-### Authentication and Payload Encryption
+### JWT Verification and Payload Parsing
 
-Incoming requests contain a JWT string in `payload`. `BetByJwtService`:
-- Private key loaded from `betby.private-key-path` (EC or RSA PEM).
-- ES256 tokens are verified with the private key.
-- RS256 tokens are parsed without signature verification in current code.
+Incoming requests contain a signed JWT string in `payload` (not encrypted). `BetByJwtService`:
+- Private key loaded from `betby.private-key-path` (EC PEM, PKCS8 or EC PRIVATE KEY).
+- ES256 tokens are verified using the loaded EC private key.
+- RS256 tokens are parsed without signature verification in current code (payload extracted only).
 
 ### Request Validation
 
@@ -93,6 +93,114 @@ Rollback:
   - `BetBySportsBetService` stores `SportsBet` records.
 - CRM events:
   - `SportsEventService` publishes `SportsBetPlacedEvent` and `SportsBetSettledEvent`.
+
+## Sequence Diagram: BET_MAKE -> BET_WIN (Idempotency + Bonus Handling)
+
+```mermaid
+sequenceDiagram
+    participant BB as BetBy
+    participant B as Backend
+    participant API as BetByApiService
+    participant TX as BetByTransactionService
+    participant BONUS as BetByBonusService
+    participant WAL as BetByWalletService
+    participant HPW as HighPerformanceWalletService
+    participant SB as BetBySportsBetService
+    participant CRM as SportsEventService
+
+    BB->>B: POST /bet/make (payload JWT)
+    B->>API: processBetMake()
+    API->>TX: transactionExists(transactionId)
+    alt duplicate
+        TX-->>API: true
+        API-->>BB: success response (balance)
+    else new bet
+        API->>TX: recordTransaction()
+        alt standard bonus bet\n(FREEBET_REFUND/FREEMONEY/COMBOBOOST)
+            API->>BONUS: processBonusBet()
+            note over API: No wallet debit
+        else real money or NO_RISK
+            API->>WAL: deductBetAmount()
+            WAL->>HPW: updateBalance(-amount, SPORTS_BET)
+            HPW-->>WAL: BalanceUpdateResult
+        end
+        API->>SB: createBetRecord()
+        API->>CRM: publishSportsBetPlaced()
+        API-->>BB: BetMakeResponse (balance in subunits)
+    end
+
+    BB->>B: POST /bet/win (payload JWT)
+    B->>API: processBetWin()
+    API->>TX: transactionExists(transactionId)
+    alt duplicate
+        TX-->>API: true
+        API-->>BB: success response (balance)
+    else new win/cashout
+        API->>TX: recordTransaction()
+        API->>WAL: creditWinnings()
+        WAL->>HPW: updateBalance(+amount, SPORTS_WIN/SPORTS_CASHOUT)
+        HPW-->>WAL: BalanceUpdateResult
+        API->>SB: updateBetStatus(WON/CASHED_OUT)
+        API->>BONUS: markBonusUsed() if bonus bet
+        API->>CRM: publishSportsBetSettled()
+        API-->>BB: BetWinResponse (balance in subunits)
+    end
+```
+
+## Sequence Diagram: BET_SETTLEMENT / BET_ROLLBACK (Refunds + Idempotency)
+
+```mermaid
+sequenceDiagram
+    participant BB as BetBy
+    participant B as Backend
+    participant API as BetByApiService
+    participant TX as BetByTransactionService
+    participant WAL as BetByWalletService
+    participant HPW as HighPerformanceWalletService
+    participant SB as BetBySportsBetService
+    participant BONUS as BetByBonusService
+    participant CRM as SportsEventService
+
+    BB->>B: POST /bet/settlement (payload JWT)
+    B->>API: processBetSettlement()
+    API->>SB: getBetByTransactionId()
+    alt already settled
+        SB-->>API: SportsBet (settled)
+        API-->>BB: success response
+    else not settled
+        API->>TX: transactionExists(transactionId)
+        alt settlement credit required\n(WON/HALF_WON/HALF_LOST/CASHED_OUT)
+            TX-->>API: false
+            API->>TX: recordTransaction()
+            API->>WAL: creditWinnings()
+            WAL->>HPW: updateBalance(+amount, SPORTS_WIN/SPORTS_CASHOUT)
+            HPW-->>WAL: BalanceUpdateResult
+        else refund required\n(CANCELED/VOID/RETURNED)
+            API->>WAL: processRefund()
+            WAL->>HPW: updateBalance(+amount, SPORTS_REFUND)
+            HPW-->>WAL: BalanceUpdateResult
+        end
+        API->>SB: updateBetStatus()
+        API->>BONUS: markBonusUsed() if bonus bet
+        API->>BONUS: processFreebetLoss() when LOST bonus bet
+        API->>CRM: publishSportsBetSettled()
+        API-->>BB: BetSettlementResponse
+    end
+
+    BB->>B: POST /bet/rollback (payload JWT)
+    B->>API: processBetRollback()
+    API->>TX: transactionExists(rollbackId)
+    alt duplicate
+        TX-->>API: true
+        API-->>BB: success response
+    else new rollback
+        API->>TX: rollbackTransaction()
+        API->>WAL: rollbackTransaction()
+        WAL->>HPW: updateBalance(rollback, SPORTS_ROLLBACK)
+        HPW-->>WAL: BalanceUpdateResult
+        API-->>BB: BetRollbackResponse (balance)
+    end
+```
 
 ### Settlement and Rollback
 
@@ -157,4 +265,3 @@ Caching:
 - `betby.private-key-path`
 - `betby.external-api.url`
 - `betby.external-api.jwt-alg`
-
