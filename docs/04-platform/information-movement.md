@@ -248,6 +248,76 @@ flowchart LR
     C --> Kafka
 ```
 
+## Flow 9 - Withdrawal Request and Payout Webhooks
+
+```mermaid
+sequenceDiagram
+    participant C as Customer UI
+    participant B as Backend API
+    participant DB as Database
+    participant PP as Payment Provider
+
+    C->>B: POST /api/customer/payment/withdraw
+    B->>B: WalletService.processWithdrawal (debit)
+    B->>DB: Transaction(WITHDRAWAL)
+    B-->>C: WithdrawalResponse (PENDING)
+
+    PP->>B: Webhook PAYOUT_COMPLETED
+    B->>B: PaymentWebhookService.handleCompletedWithdrawal
+    B->>DB: Update wallet transaction status COMPLETED
+
+    PP->>B: Webhook PAYOUT_FAILED (optional)
+    B->>B: PaymentWebhookService.handleFailedWithdrawal
+    B->>B: WalletService.processDeposit (refund)
+    B->>DB: Transaction(ADJUSTMENT/DEPOSIT refund)
+```
+
+## Flow 10 - Wagering Synchronization (Deposit + Bonus)
+
+```mermaid
+sequenceDiagram
+    participant GP as Game Provider
+    participant B as Backend API
+    participant HP as HighPerformanceWalletService
+    participant DW as DepositWageringService
+    participant BW as Bonus/Wagering
+    participant WS as WebSocket
+
+    GP->>B: changebalance BET
+    B->>HP: updateBalance(GAME_BET, real portion)
+    B->>BW: updateBonusBalance(DEBIT, bonus portion)
+    B->>DW: updateWageringProgress(real portion)
+    B->>BW: updateBonusWagering(mode-based)
+    DW-->>WS: wagering progress + milestones
+    BW-->>WS: bonus wagering progress + milestones
+```
+
+## Flow 11 - Sports Betting Settlement and Rollback
+
+```mermaid
+sequenceDiagram
+    participant S as BetBy
+    participant B as Backend API
+    participant HP as HighPerformanceWalletService
+    participant DB as Database
+
+    S->>B: bet/make
+    B->>HP: updateBalance(SPORTS_BET)
+    HP->>DB: Transaction(SPORTS_BET)
+
+    S->>B: bet/settlement (win)
+    B->>HP: updateBalance(SPORTS_WIN)
+    HP->>DB: Transaction(SPORTS_WIN)
+
+    S->>B: bet/refund
+    B->>HP: updateBalance(SPORTS_REFUND)
+    HP->>DB: Transaction(SPORTS_REFUND)
+
+    S->>B: bet/rollback
+    B->>DB: find original SPORTS_BET transaction
+    B->>HP: updateBalance(SPORTS_ROLLBACK)
+```
+
 ## Data Movement Summary
 
 - HTTP requests are handled by controller classes in `com.casino.core.controller`.

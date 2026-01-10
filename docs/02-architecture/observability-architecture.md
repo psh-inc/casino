@@ -12,10 +12,11 @@
 - Alertmanager for alert routing
 - Nginx access/error logs on host
 
-## Recommended dashboards (TODO)
+## Recommended dashboards
 
-- API latency, error rate, and throughput
-- Wallet transaction volume and failure rate
-- Bonus conversion and wagering completion
-- WebSocket connection count and message rate
-- Kafka publish and DLQ rates
+- API latency, error rate, throughput (Actuator + gateway logs)
+- Wallet metrics: transaction volume, balance updates, failure rate (`WalletMetricsController`)
+- Bonus lifecycle: awards, wagering progress, forfeits (`BonusAnalyticsController`)
+- WebSocket activity: session count, message rate (STOMP topics + logs)
+- Kafka publish rates, retries, DLQ volume (`KafkaAdminController`)
+- Reporting pipeline health (`AggregationMonitoringController`)

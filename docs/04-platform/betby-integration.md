@@ -1,6 +1,6 @@
-# BetBy Sports Betting Integration
+# BetBy Sports Betting Integration (Code-Derived)
 
-This document covers the BetBy sportsbook integration in `casino-b`. It includes inbound BetBy API callbacks, wallet operations for players, and outbound BetBy External API calls. All details are derived from code.
+This document covers the BetBy sportsbook integration in `casino-b`. It includes inbound BetBy API callbacks, wallet operations, and outbound External API calls.
 
 ## Source Files
 
@@ -11,17 +11,16 @@ Inbound BetBy API:
 - `casino-b/src/main/kotlin/com/casino/core/sports/dto/request/*`
 - `casino-b/src/main/kotlin/com/casino/core/sports/dto/response/*`
 
-BetBy wallet for authenticated players:
-- `casino-b/src/main/kotlin/com/casino/core/sports/controller/BetByWalletController.kt`
+Wallet and transaction logic:
 - `casino-b/src/main/kotlin/com/casino/core/sports/service/BetByWalletService.kt`
 - `casino-b/src/main/kotlin/com/casino/core/sports/service/BetByTransactionService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/sports/service/BetBySportsBetService.kt`
 
-BetBy JWT and crypto:
+JWT and crypto:
 - `casino-b/src/main/kotlin/com/casino/core/sports/service/BetByJwtService.kt`
 - `casino-b/src/main/kotlin/com/casino/core/sports/service/BetByPartnerJwtService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/sports/config/BetByIntegrationConfig.kt`
 
-External API (outbound):
+External API:
 - `casino-b/src/main/kotlin/com/casino/core/sports/client/BetByExternalApiClient.kt`
 - `casino-b/src/main/kotlin/com/casino/core/sports/service/BetByExternalApiIntegrationService.kt`
 - `casino-b/src/main/kotlin/com/casino/core/sports/config/BetByExternalApiResilienceConfig.kt`
@@ -45,41 +44,55 @@ Endpoints (each accepts `{ "payload": "<jwt>" }`):
 
 ### Authentication and Payload Encryption
 
-Incoming requests contain a JWT string in `payload`. The service decrypts and parses the payload with `BetByJwtService`:
+Incoming requests contain a JWT string in `payload`. `BetByJwtService`:
 - Private key loaded from `betby.private-key-path` (EC or RSA PEM).
 - ES256 tokens are verified with the private key.
-- RS256 tokens are parsed without signature verification (payload is decoded directly).
-
-This means the integration accepts RS256 payloads without signature verification in current code.
+- RS256 tokens are parsed without signature verification in current code.
 
 ### Request Validation
 
 `BetByRequestValidator` enforces:
 - Supported currencies: USD, EUR, GBP, CAD, AUD.
-- Amount bounds: min 0.01 (positive bets), max 100000.
-- Maximum selections per bet: 20.
+- Amount bounds: min 0.01, max 100000.
+- Max selections per bet: 20.
 - Max transaction id length: 100.
 
 ### Amount Units
 
-All monetary amounts from BetBy requests are in subunits.
-`CurrencySubunitConverter` converts subunits to `BigDecimal` and back for responses.
+All monetary amounts from BetBy are in subunits and converted via `CurrencySubunitConverter`.
 
-### Core Business Logic (BetByApiService)
+## Wallet and Transactions (BetByWalletService)
 
-- Idempotency: Transactions are checked by `BetByTransactionService` before processing.
-- Player validation: player must exist before funds are deducted.
+All wallet updates use `HighPerformanceWalletService.updateBalance()` to ensure atomicity and to create a ledger `Transaction`.
+
+- **Bet debit**: `TransactionType.SPORTS_BET` (negative amount)
+- **Win credit**: `TransactionType.SPORTS_WIN` or `SPORTS_CASHOUT`
+- **Refund credit**: `TransactionType.SPORTS_REFUND`
+- **Rollback**: `TransactionType.SPORTS_ROLLBACK` (reverse original bet)
+
+Validation rules:
+- Currency must match wallet currency.
+- Balance check uses wallet balance; optional bonus balance use is gated by `useBonusBalance` flag.
+- Insufficient funds raises `BetByException` with `NOT_ENOUGH_MONEY`.
+
+Rollback:
+- Locates original bet via `TransactionRepository.findByReference(originalTransactionId, "SPORTS_BET")`.
+- Applies a reversing balance update.
+
+## Core Business Logic (BetByApiService)
+
+- Idempotency: `BetByTransactionService` de-duplicates transactions before processing.
+- Player validation: player must exist.
 - Bonus handling:
-  - Standard bonus bets (FREEBET_REFUND, FREEBET_FREEMONEY, COMBOBOOST): no wallet debit.
-  - NO_RISK bonus bets: real money is debited, but funds can be refunded if bet loses.
-  - Bonus processing uses `BetByBonusService` and records usage for analytics.
+  - `FREEBET_REFUND`, `FREEBET_FREEMONEY`, `COMBOBOOST`: no wallet debit.
+  - `NO_RISK`: real money is debited, refunded if bet loses.
 - Wallet handling:
-  - Real money bets call `BetByWalletService.deductBetAmount`.
-  - Wins and refunds credit the wallet.
-- Sports bet persistence:
-  - `BetBySportsBetService` creates `SportsBet` records for history.
-- CRM event publishing:
-  - `SportsEventService` publishes `SportsBetPlacedEvent` and `SportsBetSettledEvent` for Smartico.
+  - Real money bets call `BetByWalletService.deductBetAmount()`.
+  - Wins and refunds credit wallet.
+- Persistence:
+  - `BetBySportsBetService` stores `SportsBet` records.
+- CRM events:
+  - `SportsEventService` publishes `SportsBetPlacedEvent` and `SportsBetSettledEvent`.
 
 ### Settlement and Rollback
 
@@ -93,23 +106,23 @@ Base path: `/api/v1/sports/wallet`
 
 Endpoints:
 - `GET /balance` -> returns real + bonus balances.
-- `GET /balance/check` -> checks if a bet amount is affordable.
+- `GET /balance/check` -> checks affordability.
 - `GET /transactions` -> paginated history.
 - `GET /transactions/stats` -> summary statistics.
-- `POST /reserve` -> optional fund reservation (60s TTL).
+- `POST /reserve` -> optional reservation (60s TTL).
 - `POST /release/{reservationId}` -> release reservation.
 
 Implementation detail:
-- `BetByWalletController.extractPlayerId` derives playerId from username hash as a placeholder. This may be replaced with real mapping from auth user to player id.
+- `BetByWalletController.extractPlayerId` derives playerId from username hash as a placeholder.
 
 ## BetBy External API (Outbound)
 
-External API calls use `BetByExternalApiClient`:
-- Requests are sent as `{ "payload": "<jwt>" }`.
-- JWT is signed by `BetByPartnerJwtService` using configured private key.
-- Headers include `X-BRAND-ID`.
+Requests:
+- Sent as `{ "payload": "<jwt>" }`.
+- JWT signed by `BetByPartnerJwtService`.
+- `X-BRAND-ID` header set.
 
-External API endpoints supported:
+Endpoints:
 1. `GET /api/v1/external_api/ping`
 2. `POST /api/v1/external_api/player/details`
 3. `POST /api/v1/external_api/player/segment`
@@ -121,8 +134,8 @@ External API endpoints supported:
 9. `POST /api/v1/external_api/bonus/revoke_bonus`
 
 Resilience:
-- Circuit breaker + retry configured in `BetByExternalApiResilienceConfig`.
-- Failure thresholds, backoff, and open state timing are configurable.
+- Circuit breaker + retry in `BetByExternalApiResilienceConfig`.
+- Failure thresholds, backoff, and open-state timing are configurable.
 
 Caching:
 - Bonus templates cached for 1 hour.
@@ -130,18 +143,18 @@ Caching:
 
 ## Player Segment Sync
 
-`PlayerSegmentSyncService` updates `Player.sportsSegmentName` and `sportsCcfScore`:
-- Webhook segment updates are applied unless the player has a manual override.
-- Sync can also pull segment data from the external API.
-- Segment changes are logged in `SportsPlayerSegmentHistory`.
+`PlayerSegmentSyncService`:
+- Updates `Player.sportsSegmentName` and `sportsCcfScore`.
+- Honors manual override.
+- Logs changes in `SportsPlayerSegmentHistory`.
 
 ## Configuration Keys (Code Defaults)
 
-From `BetByIntegrationConfig` and services:
-- `betby.api.url` (default `https://api.betby.com`)
+- `betby.api.url`
 - `betby.api.key`, `betby.api.secret`
 - `betby.operator.id`, `betby.operator.brand.id`
 - `betby.brand-id`
 - `betby.private-key-path`
-- `betby.external-api.url` (default `https://external-api.invisiblesport.com`)
-- External API JWT algorithm via `betby.external-api.jwt-alg` (RS256 or ES256)
+- `betby.external-api.url`
+- `betby.external-api.jwt-alg`
+

@@ -1,117 +1,133 @@
 # Bonus Logic (Code-Derived)
 
-This section documents bonus lifecycle, eligibility, wagering, and free spins.
+This section documents bonus lifecycle, eligibility, wagering, free spins, and wallet interactions.
+All details are derived from code.
 
-## Core Entities
+## Source Files
 
-- `Bonus`, `BonusReward`, `BonusActivation`, `BonusSchedule`
-- `PlayerBonusAward`, `PlayerBonusBalance`, `BonusConversion`
-- `BonusFreeSpinsConfig`, `BonusFreeSpinsCampaignMapping`, `PlayerFreeSpinsAward`
-- `BonusDepositAssociation`
+Core bonus logic:
+- `casino-b/src/main/kotlin/com/casino/core/service/BonusService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/BonusBalanceService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/BonusEligibilityService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/WageringService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/DepositWageringService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/HighPerformanceWalletService.kt`
 
-Code:
+Entities:
 - `casino-b/src/main/kotlin/com/casino/core/domain/Bonus.kt`
 - `casino-b/src/main/kotlin/com/casino/core/domain/BonusReward.kt`
 - `casino-b/src/main/kotlin/com/casino/core/domain/PlayerBonusAward.kt`
 - `casino-b/src/main/kotlin/com/casino/core/domain/PlayerBonusBalance.kt`
-- `casino-b/src/main/kotlin/com/casino/core/domain/BonusFreeSpinsConfig.kt`
+- `casino-b/src/main/kotlin/com/casino/core/domain/BonusDepositAssociation.kt`
+
+## Core Entities
+
+- `Bonus` and `BonusReward` define types, limits, wagering mode, and contribution factors.
+- `PlayerBonusAward` tracks bonus issuance and status.
+- `PlayerBonusBalance` tracks bonus funds and wagering progress.
+- `BonusDepositAssociation` preserves deposit wagering data when DEPOSIT_PLUS_BONUS replaces deposit wagering.
 
 ## Eligibility Rules
 
-Eligibility is enforced in `BonusEligibilityService`.
-
-Checks include:
-- Bonus active status.
-- Player bonus restrictions (all bonuses or specific bonus).
-- Currency compatibility (bonus eligible currencies).
-- Country whitelist and blacklist.
-- KYC requirements and category-specific KYC checks.
-- Affiliate and segment targeting.
-- Sign-up code requirements.
-- Bonus subtype constraints:
-  - SIGN_UP requires no prior deposits.
-  - RELOAD requires existing deposits.
-  - NTH_DEPOSIT requires a specific deposit number.
-- Schedule restrictions with timezone support.
-- Deposit constraints (minimum deposit and payment methods).
-
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusEligibilityService.kt`
+Eligibility is enforced in `BonusEligibilityService` and includes:
+- Bonus active status and schedule window.
+- Player restrictions and segmentation.
+- Currency and country rules.
+- KYC and category-specific checks.
+- Deposit constraints and payment method constraints.
+- Bonus subtype rules (SIGN_UP, RELOAD, NTH_DEPOSIT, etc).
 
 ## Bonus Creation and Activation
 
-`BonusService` handles creation and activation:
-- Validates category vs reward compatibility.
-- Writes multi-currency limits for max bet, min termination, and max win.
+`BonusService`:
+- Validates category/reward compatibility.
 - Creates `BonusReward` entries and free spins configs.
 - Activation types: `AUTOMATIC`, `MANUAL_CLAIM`, `DEPOSIT_SELECTION`.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusService.kt`
+## Bonus Balance Creation
 
-## Bonus Balance and Wagering
+`BonusBalanceService.createBonusBalance()`:
+- Resolves wagering mode via `BonusWageringModeResolver`.
+- Wagering base:
+  - `BONUS_ONLY`: bonus amount
+  - `DEPOSIT_PLUS_BONUS`: bonus amount + deposit amount
+- Cancels active deposit wagering if mode is DEPOSIT_PLUS_BONUS.
+- Locks deposit amount in `PlayerBonusBalance.lockedDepositAmount`.
+- Records `BonusDepositAssociation` to restore deposit wagering if bonus is forfeited.
+- Invalidates bonus cache after transaction commit (OCP-671).
 
-`BonusBalanceService` manages bonus balances:
+## Bonus Wagering Progress
 
-- `BONUS_ONLY` wagering:
-  - Wagering base is bonus amount.
-- `DEPOSIT_PLUS_BONUS` wagering:
-  - Wagering base is bonus + deposit.
-  - Cancels active deposit wagering requirements.
-  - Locks deposit amount until wagering completes.
-- Wagering requirement formula: `wageringRequirement = wageringBase * wageringMultiplier`.
+### Event-driven (GameRoundCompletedEvent)
 
-Wagering completion:
-- Converts bonus balance to real money via `WalletService.credit`.
-- Updates award status to COMPLETED.
-- Invalidates bonus cache and emits WebSocket updates.
+`WageringService.processGameRoundWagering()`:
+- Processes only if funding source is not REAL_MONEY.
+- Applies game contribution factors from `BonusReward`.
+- Creates `WageringTransaction` records.
+- Updates `PlayerBonusBalance.wageringCompleted` and caps at requirement.
+- Publishes WebSocket notifications and milestones.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusBalanceService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/WageringService.kt`
-
-## Bonus Wagering Updates During Gameplay
+### Provider Wallet Callbacks
 
 `ProviderIntegrationService.processBetTransactionCached()`:
-- Calculates bet split between real and bonus funds.
-- Determines if wagering should be updated based on mode and contribution factor.
-- Updates wagering via `HighPerformanceWalletService.updateBonusWagering()`.
-- When wagering is complete, calls `BonusBalanceService.checkAndCompleteWagering()`.
+- Updates bonus wagering through `HighPerformanceWalletService.updateBonusWagering()`.
+- Wagering mode handling:
+  - `BONUS_ONLY`: only bonus portion counts.
+  - `DEPOSIT_PLUS_BONUS`: full bet counts.
+- On completion, calls `BonusBalanceService.checkAndCompleteWagering()`.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/HighPerformanceWalletService.kt`
+### Completion and Conversion
+
+`BonusBalanceService.checkAndCompleteWagering()`:
+- Releases locked deposit.
+- Credits real wallet using `TransactionType.BONUS_CONVERSION`.
+- Sets bonus balance to zero and marks award `COMPLETED`.
+- Invalidates bonus cache after commit.
+
+## Bonus Balance Debits and Credits
+
+`HighPerformanceWalletService.updateBonusBalance()`:
+- BONUS debit: FIFO by creation time.
+- BONUS credit: adds to oldest active bonus balance.
+- BONUS convert: credits real wallet and zeroes bonus balances.
+- BONUS expire: deactivates and zeros balance.
+
+`BonusBalanceService.deductFromBalance()`:
+- Used in `GameCallbackService` for bonus bet deductions.
 
 ## Bonus Bet Limits
 
-Bonus bet limits are validated when bonus funds are used:
-- `BonusBalanceService.validateBonusBetLimit`.
-- Bet limit violations trigger WebSocket notifications.
+`BonusBalanceService.validateBonusBetLimit()`:
+- Enforced when a bet uses bonus funds.
+- Violations produce WebSocket notifications and `BonusBetLimitExceededException`.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusBalanceService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`
+## Deposit Wagering Interaction
 
-## Free Spins and Campaigns
+- When DEPOSIT_PLUS_BONUS is activated, active deposit wagering is cancelled.
+- When bonus is forfeited, deposit wagering can be restored using `BonusDepositAssociation` and `DepositWageringService.createDepositWageringFromAssociation()`.
 
-Free spins can be awarded by:
-- Bonus rewards in `BonusService`.
-- External campaigns via Campaigns API.
+## Free Spins
 
-Free spin tracking:
-- `FreeSpinsCallbackService` increments `spinsUsed` and tracks `totalWinnings`.
-- Max win caps are enforced per award.
+Free spins are tracked independently of wallet balance:
+- Awards stored in `PlayerFreeSpinsAward`.
+- `FreeSpinsCallbackService` tracks spins used and total winnings.
+- Free spin bets do not debit wallet; wins are credited to real balance.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusLogicService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/FreeSpinsService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/FreeSpinsCallbackService.kt`
+## CRM (Smartico) Interaction
 
-## CRM and Smartico Integration
+Smartico bonus activation endpoints:
+- `/api/v1/smartico/bonuses/active`
+- `/api/v1/smartico/bonuses/activate`
 
-- Smartico can activate bonuses via `/api/v1/smartico/bonuses/activate`.
-- Zero-wagering bonuses are deposited to real balance; wagering bonuses create bonus balance.
+Zero-wagering bonuses can be credited directly to wallet; wagering bonuses create bonus balances.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/controller/integration/SmarticoController.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusService.kt`
+## Wallet and Transaction Types
+
+Bonus-related transaction types:
+- `BONUS_BET`, `BONUS_WIN`, `BONUS_CONVERSION`, `BONUS_EXPIRED`, `BONUS_AWARDED`
+
+Wallet updates occur through:
+- `HighPerformanceWalletService.updateBonusBalance()`
+- `WalletService.credit()` for bonus conversion
+

@@ -8,11 +8,12 @@ Status: Draft (initial docs generated from current codebase)
 The codebase is the source of truth. Contracts and specs are managed as code.
 
 Primary sources:
-- Backend: casino-b/src/main, casino-b/docs/api, casino-b/specs
-- Admin frontend: casino-f/src/app, casino-f/docs
-- Customer frontend: casino-customer-f/src/app, casino-customer-f/docs
+- Backend: casino-b/src/main, casino-b/src/main/resources
+- Admin frontend: casino-f/src/app
+- Customer frontend: casino-customer-f/src/app
 - Infrastructure: infra/, config/, scripts/
 - Operational guidance: QA_TESTING_GUIDE.md, CODE_REVIEW_SECURITY_ASSESSMENT_2025-12-14.md
+- Compliance sources: docs/06-compliance/regulatory-sources.md
 
 ## Document ownership
 
@@ -51,5 +52,5 @@ Primary sources:
 
 ## Known gaps (must be closed)
 
-- Formal non-functional targets (SLO/SLI, RTO/RPO) are not defined in code; kept as TODO in docs.
-- Regulatory sources are not specified in repo; compliance docs are placeholders with open questions.
+- Formal non-functional targets (SLO/SLI, RTO/RPO) are not defined in code; documented as explicit gaps.
+- Compliance obligations are sourced and documented, but evidence collection is not yet assessed.

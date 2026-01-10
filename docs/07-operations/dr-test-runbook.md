@@ -1,6 +1,6 @@
 # DR Test Runbook
 
-Status: TODO (define RTO/RPO and DR environment)
+Status: Not defined in repo (RTO/RPO and DR environment are not specified in code)
 
 Suggested steps:
 1. Restore PostgreSQL from latest backup into DR environment.

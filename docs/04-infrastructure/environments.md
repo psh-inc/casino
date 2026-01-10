@@ -9,12 +9,9 @@
 - Customer SPA: casino-customer-f (ng serve)
 - Dependencies: local PostgreSQL, Redis, Kafka (optional)
 
-### Staging (TODO)
+### Staging
 
-No staging environment definition is present in repo. Define:
-- Hostnames
-- Data isolation and anonymization
-- Monitoring and alerting
+No staging environment definition is present in the repo. Any staging topology, hostnames, data isolation, and monitoring requirements must be defined by ops.
 
 ### Production
 

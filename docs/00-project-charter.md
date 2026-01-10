@@ -30,10 +30,12 @@ Out of scope (not present in repo):
 - Responsible gambling: limits, cooling-off, self-exclusion
 - Admin operations: player management, reporting, payments, compliance
 
-## Success criteria (TODO)
+## Success criteria
 
-- SLOs (availability/latency) are not defined in repo; add targets.
-- RTO/RPO targets for DR are not defined; add targets.
+- All platform modules and integrations are documented with code references.
+- API and event contracts are published in `specs/` and indexed in `specs/README.md`.
+- Documentation link hygiene passes (see `scripts/check_md_links.py`).
+- Non-functional targets (SLOs, RTO/RPO) are acknowledged as gaps when not defined in code.
 
 ## Constraints
 

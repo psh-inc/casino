@@ -16,7 +16,7 @@
 2) Contract maturity
 - Publish OpenAPI specs under specs/openapi
 - Publish AsyncAPI specs for Kafka topics
-- Align API docs under casino-b/docs/api
+- Maintain the contracts map under docs/04-platform/contracts-map.md
 
 3) Production readiness
 - Finalize infra hardening and monitoring
@@ -29,8 +29,8 @@
 - Improve CMS and localization flows
 - Enhance AI-based recommendations and personalization
 
-## Open questions (TODO)
+## Open questions
 
-- Target jurisdictions and compliance frameworks
+- Additional jurisdictions beyond Anjouan and their compliance frameworks
 - Target availability/latency SLOs and RTO/RPO
 - Release cadence and migration windows

@@ -9,7 +9,7 @@ Provide a repeatable workflow for AI-assisted changes in this repo.
 - AGENTS.md (submodule workflow rules)
 - CLAUDE.md (architecture + coding rules)
 - docs/03-modules/README.md (module boundaries)
-- specs/README.md and casino-b/specs (contracts)
+- specs/README.md (contracts)
 
 ## Standard workflow
 
@@ -19,7 +19,7 @@ Provide a repeatable workflow for AI-assisted changes in this repo.
 
 2) Read relevant docs and code
 - Use module specs under docs/03-modules
-- For backend changes, review casino-b/docs/api and casino-b/specs
+- For backend changes, review specs/openapi and specs/asyncapi
 
 3) Implement changes
 - Follow coding standards in CLAUDE.md

@@ -3,7 +3,7 @@
 ## Principles
 
 - Use clear, testable language with SHALL/SHOULD/MAY when specifying behavior.
-- Keep content tied to code. Avoid guesses; use TODOs for unknowns.
+- Keep content tied to code. Avoid guesses; explicitly state when something is not defined in code.
 - Avoid secrets and environment values in docs. Use variable names only.
 - Prefer relative links to repo files.
 

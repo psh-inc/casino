@@ -47,7 +47,7 @@ Hashing rules in `ProviderSecurityService`:
 - Response hash: `SHA1(status + response_timestamp + secretKey)`
 
 Security note:
-- `validateAuthorizationHeader()` and `validateRequestHash()` currently return `true` regardless of input. This is explicitly marked as TODO in code.
+- `validateAuthorizationHeader()` and `validateRequestHash()` currently return `true` regardless of input. Hash values are logged but not enforced.
 
 Key payloads:
 - `ProviderChangeBalanceRequestData` includes `token`, `user_id`, `transaction_type`, `transaction_id`, `round_id`, `game_id`, `currency_code`, `amount`, `context`.

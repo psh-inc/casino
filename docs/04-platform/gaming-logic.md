@@ -1,131 +1,111 @@
 # Gaming Logic (Code-Derived)
 
-This section documents game lifecycle, launch, callbacks, and round accounting logic from backend services.
+This section documents game lifecycle, launch, callbacks, betting, and wallet interactions.
+All details are derived from code.
+
+## Source Files
+
+- `casino-b/src/main/kotlin/com/casino/core/service/GameLaunchService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/GameCallbackService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/GameRoundService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/WinDistributionService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/HighPerformanceWalletService.kt`
 
 ## Core Entities
 
-Key entities in `casino-b/src/main/kotlin/com/casino/core/domain`:
 - `Game`, `GameProvider`, `Vendor`, `GameCategory`
 - `GameSession` (sessionUuid, mode, totals)
 - `GameLaunchTransaction` (launchUrl, token, device, geo)
-- `GameRound` (roundId, bet/win amounts, betType, status)
+- `GameRound` (roundId, bet/win amounts, betType, status, bet split)
 - `ProviderTransaction` (idempotency for provider callbacks)
-- `GameAvailabilityRestriction`, `CountryAvailabilityRestriction`, `PlayerGameRestriction`
 
 ## Game Launch Pipeline
 
-Primary path: `GameLaunchController` -> `GameLaunchService`
+`GameLaunchService.launchGame()`:
+1. Validate player status (BLOCKED/SUSPENDED/SELF_EXCLUDED/COOLING_OFF are blocked).
+2. Enforce email verification if configured (`ComplianceSettingsService`).
+3. Geo-detect country from IP (`GeoLocationService`).
+4. Apply game availability and restriction rules.
+5. Enforce session time limits.
+6. Create `GameLaunchTransaction` + `GameSession`.
+7. Build launch URL with provider/operator params.
 
-Steps in `GameLaunchService.launchGame()`:
-1. Load player by username and validate status:
-   - BLOCKED, SUSPENDED, FROZEN, SELF_EXCLUDED, COOLING_OFF are blocked.
-2. Enforce email verification for gameplay if configured:
-   - Grace period hours from `ComplianceSettingsService`.
-   - Logs `ComplianceEventType.PAYMENT_BLOCKED_NO_EMAIL_VERIFICATION`.
-3. Geo-detect country from IP via `GeoLocationService`.
-4. Apply country and game availability restrictions via `GameAvailabilityService`.
-5. Enforce session time limit by checking recent completed sessions.
-6. Create `GameLaunchTransaction` and `GameSession` records.
-7. Build launch URL:
-   - Base host from provider or operator config.
-   - Query params include mode, game_id, token, currency, language, operator_id, homeurl, session_id, device, player_id, username, RTP and bet overrides.
+## Bet and Win Handling (Generic Game Callbacks)
 
-Relevant code:
-- `casino-b/src/main/kotlin/com/casino/core/service/GameLaunchService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameAvailabilityService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameRestrictionService.kt`
+`GameCallbackService.processGameRound()`:
 
-## Session Management
+### Bet Deduction
 
-- Active sessions are stored in `GameSession` and `GameLaunchTransaction`.
-- `forceEndActiveSessionsForPlayer()` terminates active sessions and invalidates cache.
-- Session keep-alive updates the launch transaction timestamp.
+Algorithm (`calculateAndDeductBet`):
+- Real money is used first.
+- Bonus balances are used FIFO (oldest bonus first).
+- Funding source recorded as `FundingSource.REAL_MONEY`, `BONUS_MONEY`, or `MIXED`.
+- If real balance is fully depleted during the bet, `BalanceTransitionService.notifyRealBalanceDepleted()` is triggered.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/GameLaunchService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/cache/GameSessionCacheService.kt`
+Application (`applyBetDeduction`):
+- Real balance is debited via `WalletService.updateBalanceByAmount()`.
+- Bonus balances are reduced via `BonusBalanceService.deductFromBalance()`.
+- Bonus cache is invalidated in `HighPerformanceWalletService`.
 
-## Availability and Restriction Logic
+### GameRound Creation
 
-Availability uses a precedence model:
-1. Game-specific country restriction
-2. Global country restriction
-3. Default allow
+`GameRound` stores:
+- `realBetAmount` and `bonusBetAmount` (OCP-692) for proportional wins.
+- `betType` derived from funding source (`BONUS_BET`, `MIXED_BET`, or `GAME_BET`).
 
-Player-specific restrictions are checked separately:
-- `GameRestrictionService.isGameAvailableForPlayer()` checks global enable + player restriction.
+### Win Distribution
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/GameAvailabilityService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameRestrictionService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/CountryAvailabilityRestrictionService.kt`
+`WinDistributionService.calculateProportionalDistribution()`:
+- Splits win by `realBetAmount` vs `bonusBetAmount`.
+- Credits bonus portion to bonus balance if active bonus exists.
+- Fallback: bonus portion credited to real wallet if no active bonus.
 
-## Provider Wallet Callback Logic (ChangeBalance)
+### Transactions
 
-Primary path: `ProviderCallbackController` -> `ProviderIntegrationService`.
+- GAME_BET and GAME_WIN transactions record `balanceBefore` and `balanceAfter`.
+- Funding source is stored in transaction record.
 
-Key rules:
+### Kafka Events
+
+- Bet placed, win awarded, and round completed events are published to Kafka via `GameEventService`.
+
+## Provider Wallet Callbacks (Primary Casino Flow)
+
+`ProviderIntegrationService` handles `/changebalance`:
+
 - Idempotency: provider transaction ID + request hash.
-- Transaction types: BET, WIN, REFUND.
-- Token required for BET (unless PROMO-FREESPIN). WIN/REFUND can be tokenless.
-- Game restrictions applied only for BET and non-free-spin.
-- Bet limit validation and session time limits enforced before debit.
-- Real money is always spent first; bonus balance used only if needed.
-- Bonus max bet limit applies when bonus funds used.
-- Buy-feature bets are rejected if bonus funds are involved.
-- Wagering contribution uses game contribution factor and wagering mode.
+- BET processing:
+  - Validates session, player status, bet limits, and game restrictions.
+  - Splits bet into real + bonus (real first).
+  - Debits real balance via `HighPerformanceWalletService.updateBalance(TransactionType.GAME_BET)`.
+  - Debits bonus via `HighPerformanceWalletService.updateBonusBalance()`.
+  - Updates deposit wagering for real portion (unless bonus mode is DEPOSIT_PLUS_BONUS).
+  - Updates bonus wagering via `updateBonusWagering()` based on wagering mode.
+- WIN processing:
+  - Uses `WinDistributionService` to split win.
+  - Credits real balance and/or bonus balance.
+  - Falls back to real balance if bonus credit fails.
+- REFUND processing:
+  - Credits real balance and marks round VOIDED.
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/controller/ProviderCallbackController.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/WinDistributionService.kt`
+## Deposit and Bonus Wagering Sync
 
-## Game Round and Win Accounting
+- Deposit wagering updates are performed via `DepositWageringService.updateWageringProgress()`.
+- Bonus wagering updates occur via `HighPerformanceWalletService.updateBonusWagering()` or `WageringService` (GameRoundCompletedEvent).
+- Wagering modes:
+  - `BONUS_ONLY`: only bonus portion counts.
+  - `DEPOSIT_PLUS_BONUS`: full bet counts (bonus + deposit).
 
-Two parallel paths exist:
+## Free Spins
 
-1) Provider Wallet Callbacks
-- `ProviderIntegrationService` creates or updates `GameRound` for bet/win.
-- `GameRoundService` marks rounds as PENDING on bet and COMPLETED on win.
+- Free spin BET does not debit wallet.
+- Free spin WIN credits real wallet.
+- Free spin tracking is handled via `PlayerFreeSpinsAward`.
 
-2) Generic Game Callbacks
-- `GameCallbackService.processGameRound()` handles bet and win in one call.
-- Calculates bet split (real vs bonus) before creating `GameRound`.
-- Uses `WinDistributionService` for proportional win split:\n  - `realWin = winAmount * (realBet / (realBet + bonusBet))`\n  - `bonusWin = winAmount - realWin` (rounding remainder to bonus).
+## Idempotency and Consistency
 
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/GameRoundService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameCallbackService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/WinDistributionService.kt`
+- Provider wallet callbacks are idempotent by provider transaction ID and request hash.
+- Generic callbacks store `GameCallbackLog` for audit.
+- Game rounds are created or updated even if WIN arrives before BET (WIN-before-BET race).
 
-## Free Spins Handling
-
-Free spins can be driven by external campaigns:
-- Provider context `reason` includes PROMO-FREESPIN.
-- Campaign code is validated against local `PlayerFreeSpinsAward` records.
-- Free spin BET transactions do not debit wallet; win credits are tracked.
-
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/FreeSpinsCallbackService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/ProviderIntegrationService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/BonusLogicService.kt`
-
-## Game Discovery and Catalog
-
-- `GameDiscoveryService` provides featured, popular, new, and filtered search results.
-- Availability filters are applied per country using `GameAvailabilityService`.
-- Provider, category, and vendor catalogs are managed by admin controllers and services.
-
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/GameDiscoveryService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameProviderService.kt`
-
-## Caching and Sync
-
-- `InMemoryGameCache` stores game list snapshots.
-- Sync endpoints exist for provider/game catalog refresh.
-
-Code:
-- `casino-b/src/main/kotlin/com/casino/core/service/cache/InMemoryGameCache.kt`
-- `casino-b/src/main/kotlin/com/casino/core/controller/GameProviderSyncController.kt`

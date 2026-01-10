@@ -11,15 +11,17 @@ Provider wallet callbacks and security:
 - `casino-b/src/main/kotlin/com/casino/core/service/ProviderResponseService.kt`
 - `casino-b/src/main/kotlin/com/casino/core/service/ProviderSecurityService.kt`
 - `casino-b/src/main/kotlin/com/casino/core/dto/provider/*`
-- `casino-b/src/main/kotlin/com/casino/core/filter/GameCallbackLoggingFilter.kt`
 
 Provider management and sync:
 - `casino-b/src/main/kotlin/com/casino/core/controller/GameProviderController.kt`
 - `casino-b/src/main/kotlin/com/casino/core/controller/GameProviderSyncController.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/GameProviderService.kt`
 - `casino-b/src/main/kotlin/com/casino/core/service/GameProviderSyncService.kt`
-- `casino-b/src/main/kotlin/com/casino/core/service/sync/*`
-- `casino-b/src/main/kotlin/com/casino/core/domain/GameProvider*.kt`
+
+Wallet and wagering:
+- `casino-b/src/main/kotlin/com/casino/core/service/HighPerformanceWalletService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/DepositWageringService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/BonusBalanceService.kt`
+- `casino-b/src/main/kotlin/com/casino/core/service/WinDistributionService.kt`
 
 ## Callback API Surface
 
@@ -36,143 +38,126 @@ Endpoints:
 
 ### Request Envelope
 
-All POST endpoints use a wrapper:
-
-- `ProviderApiRequest<T>`
-  - `command`
-  - `request_timestamp`
-  - `hash`
-  - `data` (request body specific to endpoint)
-
-Command must match the endpoint name (for example `authenticate`, `balance`, `changebalance`, etc).
+All POST endpoints use `ProviderApiRequest<T>`:
+- `command`
+- `request_timestamp`
+- `hash`
+- `data` (request-specific payload)
 
 ### Response Envelope
 
-All responses use `ProviderApiResponse` with a nested `ProviderResponsePayload`:
-
+All responses use `ProviderApiResponse`:
 - `status`: `OK` or `ERROR`
 - `response_timestamp`
 - `hash`
-- `data`: success payload or `ProviderErrorData` (error_code + error_message)
+- `data`: success payload or error payload
 
 ### Headers and Security
 
-Required headers (per code checks in `ProviderCallbackController`):
-- `X-Operator-Id` must match configured operator id.
-- `X-Authorization` must match expected hash for the command.
+Required headers:
+- `X-Operator-Id` matches configured operator id.
+- `X-Authorization` matches expected hash for the command.
 
-Hash logic (see `ProviderSecurityService`):
-- `X-Authorization`: SHA1(command + secretKey) or SHA1(command + operatorId + secretKey) depending on `includeOperatorId`.
-- Request body `hash`: SHA1(command + request_timestamp + secretKey).
-- Response hash: SHA1(status + response_timestamp + secretKey).
+Hash logic (`ProviderSecurityService`):
+- Authorization hash: `SHA1(command + secretKey)` or `SHA1(command + operatorId + secretKey)`
+- Request hash: `SHA1(command + request_timestamp + secretKey)`
+- Response hash: `SHA1(status + response_timestamp + secretKey)`
 
-Implementation detail from code:
-- `ProviderSecurityService.validateAuthorizationHeader` and `validateRequestHash` currently return `true` unconditionally (TODO markers). This means header and body hashes are logged but not enforced at runtime.
+Implementation detail:
+- `validateAuthorizationHeader` and `validateRequestHash` currently return `true` unconditionally. Hashes are logged but not enforced.
 
 ## Business Logic by Endpoint
 
 ### Authenticate
-- Input: `ProviderAuthenticateRequestData(token)`.
-- Flow:
-  - Fetch game session by token from `GameSessionCacheService`.
-  - Validate session is active.
-  - Fetch player from `PlayerCacheService`.
-  - Reject if player blocked or session invalidated.
-  - Balance = real wallet + playable bonus balance.
-  - Country is taken from player's primary address; defaults to `XX` if missing.
-- Output: `ProviderAuthenticateResponseData` (userId, username, country, displayName, currency, balance).
+
+- Validates session token via `GameSessionCacheService`.
+- Rejects blocked players.
+- Returns wallet + bonus balance.
 
 ### Balance
-- Input: `ProviderBalanceRequestData(token, user_id, currency_code)`.
-- Flow:
-  - Validate playerId and currency match.
-  - Token is mandatory; validates active session in cache.
-  - Balance = real wallet + playable bonus balance.
-- Output: `ProviderBalanceResponseData`.
+
+- Requires valid session token and currency match.
+- Returns combined real + bonus balance.
 
 ### Change Balance
-- Input: `ProviderChangeBalanceRequestData` (transaction_id, round_id, game_id, amount, transaction_type, currency, token, context).
-- Idempotency:
-  - The combination of `transaction_id` + `providerName` is stored in `ProviderTransaction`.
-  - If transaction already exists and the `requestHash` matches, the existing balance is returned.
-  - Same transaction id with different data returns error `OP_40`.
 
-Common validations:
-- Player exists and not blocked (WIN transactions bypass blocking to avoid stuck payouts).
-- Currency matches wallet currency.
-- BET requires active session unless it is a promotional free spin.
-- WIN/REFUND can be processed without an active session.
+`ProviderIntegrationService.processBetTransactionCached()` handles BET/WIN/REFUND.
 
-Transaction types:
-- `BET`:
-  - Rejects zero or negative amount.
-  - Rejects if game disabled or restricted by active bonuses (unless free spin).
-  - Enforces bet limits and session time limits (`BetLimitValidationService`).
-  - Splits bet into real + bonus portions, always using real money first.
-  - Blocks buy-feature bets that attempt to use bonus funds.
-  - Enforces bonus max bet limit for bonus-funded bets.
-  - Creates/updates `GameRound` with bet split.
-  - Debits real wallet and bonus balance (if needed).
-  - Updates deposit wagering progress when eligible.
-  - Updates bonus wagering progress based on wagering mode and game contribution factor.
-  - Records bet for cumulative bet limit tracking.
+Idempotency:
+- Provider transaction is keyed by `transaction_id` + provider.
+- Same transaction ID with different hash returns error `OP_40`.
 
-- `WIN`:
-  - Creates or finds `GameRound` and marks it completed when needed.
-  - Uses proportional win distribution based on stored bet split (real vs bonus).
-  - Credits real wallet and/or bonus balance accordingly, with fallback to real if bonus credit fails.
-  - Triggers wagering completion checks.
+#### BET
 
-- `REFUND`:
-  - Credits real wallet (positive amount).
-  - If game round exists, marks it as VOIDED.
+Validation:
+- Player status and session status.
+- Game availability and restrictions.
+- Bet limits and session time limit.
+- Buy-feature bets are rejected if bonus funds would be used.
 
-Free spin handling:
-- Free spin transactions are detected by `GameRound.betType` or PROMO-FREESPIN context.
-- Free spin BETs do not debit wallet; they create `FREE_SPIN_BET` transactions with zero amount.
-- Free spin WINs credit real wallet and update round status.
+Wallet updates:
+- Bet is split real first, then bonus.
+- Real portion: `HighPerformanceWalletService.updateBalance(TransactionType.GAME_BET)`.
+- Bonus portion: `HighPerformanceWalletService.updateBonusBalance(BonusOperation.DEBIT)`.
+
+Wagering sync:
+- Deposit wagering updated for real portion if:
+  - no active bonus, or
+  - bonus mode is BONUS_ONLY.
+- Bonus wagering updated based on wagering mode and contribution factor.
+
+Game rounds:
+- `findOrCreateGameRound()` stores bet split (`realBetAmount` / `bonusBetAmount`).
+- Bet type stored for proportional win distribution.
+
+#### WIN
+
+- Uses `WinDistributionService` to split wins based on stored bet split.
+- Real win credited via `HighPerformanceWalletService.updateBalance(TransactionType.GAME_WIN)`.
+- Bonus win credited via `HighPerformanceWalletService.updateBonusBalance(BonusOperation.CREDIT)`.
+- If bonus credit fails, falls back to real wallet credit.
+
+#### REFUND
+
+- Credits real wallet balance.
+- Marks game round VOIDED if present.
 
 ### Status
-- Input: `ProviderTransactionStatusRequestData`.
-- Output: `ProviderTransactionStatusResponseData` with status from stored provider transaction.
+
+- Returns status from stored provider transaction.
 
 ### Cancel
-- Input: `ProviderCancelTransactionRequestData`.
-- If transaction not found, returns `CANCELED` to keep provider flows idempotent.
-- If transaction exists and status is OK, reverses the transaction by updating wallet balance and marks provider transaction as CANCELED.
+
+- If transaction missing, returns CANCELED for idempotency.
+- If transaction exists, reverses balance and marks provider transaction CANCELED.
 
 ### Finish Round
-- Input: `ProviderFinishRoundRequestData`.
-- Marks the `GameRound` as `COMPLETED` and updates bet type to win type when win amount is positive.
-- Idempotent if round already completed.
 
-## Game Round Creation and Bet Types
+- Marks round as COMPLETED.
+- Updates bet type if there was a win.
 
-`ProviderIntegrationService.findOrCreateGameRound`:
-- Creates a `GameRound` on BET, or on WIN when a BET did not arrive first (WIN-before-BET race).
-- Uses session token if available; otherwise finds most recent active session by player + game.
-- Determines initial bet type based on free spin, bonus-only, mixed, or real-money bet.
-- Stores real/bonus bet split for proportional win distribution (`OCP-692`).
+## Wagering Synchronization Rules
 
-## Provider Transaction Tracking
+Deposit wagering:
+- Updated only for real-money portion when bonus mode is BONUS_ONLY.
+- Skipped when bonus mode is DEPOSIT_PLUS_BONUS (bonus wagering already includes deposit).
 
-`ProviderTransaction` is recorded for each change balance call:
-- `providerTransactionId`, `providerName`, `roundId`, `gameId`, `userId`.
-- `transactionType` in {BET, WIN, REFUND}.
-- `status` in {OK, CANCELED}.
-- `originalRequestHash` stored for idempotency.
+Bonus wagering:
+- Contribution factor pulled from bonus reward configuration.
+- Wagering base depends on mode:
+  - BONUS_ONLY: bonus portion
+  - DEPOSIT_PLUS_BONUS: full bet
 
 ## Provider Sync (Game List)
 
 `GameProviderSyncService`:
-- Implements sync for provider code `TLT`.
-- Pulls game list from `PlatformApiService.getAllGames()`.
-- Creates categories (slots, tablegames, crashgame) if missing.
-- Processes games in batches with `GameBatchProcessor` and `EnhancedSyncProgressTracker`.
+- Syncs game list for provider `TLT` using `PlatformApiService.getAllGames()`.
+- Creates categories if missing.
+- Processes batches and writes sync history.
 - Disables games not present in provider data.
-- Updates sync history and triggers async cache refresh.
 
 ## Observability
 
-- `GameCallbackLoggingFilter` logs headers/body for provider callbacks under `/api/v1/provider/*`.
-- Provider sync history is stored in `GameProviderSyncHistory` with batch and progress data.
+- Provider callbacks are logged by `GameCallbackLoggingFilter`.
+- Sync history is stored in `GameProviderSyncHistory`.
+

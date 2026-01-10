@@ -24,6 +24,7 @@ No legacy documentation was used as a source. Each section references the specif
 - `smartico-kafka-events.md` - Smartico Kafka topics and payload schemas
 - `cellxpert-integration.md` - Cellxpert affiliate integration
 - `reporting-analytics.md` - reporting, analytics, and statistics modules
+- `contracts-map.md` - OpenAPI endpoint map by tag and controller
 - `other-modules.md` - additional modules and endpoints inventory
 - `module-inventory.md` - full component inventory by module and package
 
@@ -41,4 +42,6 @@ No legacy documentation was used as a source. Each section references the specif
   - `specs/openapi/smartico.yaml`
   - `specs/openapi/cellxpert.yaml`
   - `specs/openapi/reporting-analytics.yaml`
-- Event contracts: `specs/asyncapi/smartico-events.yaml`
+- Event contracts:
+  - `specs/asyncapi/smartico-events.yaml`
+  - `specs/asyncapi/casino-core.json`
