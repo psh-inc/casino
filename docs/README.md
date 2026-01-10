@@ -3,11 +3,12 @@
 This documentation set describes the casino platform across the backend (casino-b), admin frontend (casino-f), customer frontend (casino-customer-f), shared library (casino-shared), and infrastructure (infra/).
 
 Sources used for this docs set:
-- Root: README.md, CLAUDE.md, GEMINI.md, QA_TESTING_GUIDE.md, CODE_REVIEW_SECURITY_ASSESSMENT_2025-12-14.md
-- Backend: casino-b/README.md, casino-b/docs/api/*, casino-b/specs/*, KafkaTopics.kt
-- Admin frontend: casino-f/docs/*, casino-f/src/app/modules
-- Customer frontend: casino-customer-f/docs/*, casino-customer-f/src/app/features
-- Infra: infra/*, config/postgres/*, .env.example, .env.production.example
+- Backend: `casino-b/src/main/kotlin`, `casino-b/src/main/resources` (code + runtime config)
+- Admin frontend: `casino-f/src/app`
+- Customer frontend: `casino-customer-f/src/app`
+- Shared library: `casino-shared`
+- Infra/config: `infra/*`, `config/*`
+- Compliance: Anjouan OFA and Gaming Board sources listed in `docs/06-compliance/regulatory-sources.md`
 
 Start here (recommended order):
 1. DOCS_GOVERNANCE.md - ownership, review cadence, approval gates

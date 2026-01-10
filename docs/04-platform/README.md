@@ -35,6 +35,7 @@ No legacy documentation was used as a source. Each section references the specif
 - Admin UI: `casino-f/src/app`
 - Customer UI: `casino-customer-f/src/app`
 - API contracts:
+  - `specs/openapi/casino-core.json`
   - `specs/openapi/provider-integration.yaml`
   - `specs/openapi/betby.yaml`
   - `specs/openapi/smartico.yaml`
