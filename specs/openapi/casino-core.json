@@ -90361,6 +90361,7 @@
       },
       "GameResultRequest": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | required |\n| gameId | string | required |\n| roundId | string? | optional |\n| playerId | number? | optional |\n| betAmount | number | required, positive |\n| winAmount | number | required |\n| currency | string | required |\n| roundStartTime | string? | ISO date-time |\n| roundEndTime | string? | ISO date-time |\n| roundStatus | string | default \"COMPLETED\" |\n| gameData | object? | optional |\n| providerTransactionId | string? | optional |\n| deviceInfo | string? | optional |\n| additionalInfo | object? | optional |",
         "properties": {
           "sessionId": {
             "type": "string"
@@ -90435,6 +90436,7 @@
       },
       "GameResultResponse": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| transactionId | string | internal transaction id |\n| sessionId | string | session id |\n| status | string | OK/ERROR (service-defined) |\n| balance | number | current balance |\n| timestamp | string | ISO date-time |\n| message | string? | optional |\n| additionalData | object? | optional |",
         "properties": {
           "transactionId": {
             "type": "string"
@@ -90475,6 +90477,7 @@
       },
       "BalanceUpdateRequest": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | required |\n| gameId | string | required |\n| playerId | number? | optional |\n| amount | number | required |\n| currency | string | required |\n| transactionType | string | required |\n| roundId | string? | optional |\n| providerTransactionId | string? | optional |\n| reason | string? | optional |\n| deviceInfo | string? | optional |",
         "properties": {
           "sessionId": {
             "type": "string"
@@ -90524,6 +90527,7 @@
       },
       "BalanceUpdateResponse": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| transactionId | string | internal transaction id |\n| sessionId | string | session id |\n| balanceBefore | number | balance before update |\n| balanceAfter | number | balance after update |\n| status | string | OK/ERROR (service-defined) |\n| timestamp | string | ISO date-time |\n| message | string? | optional |",
         "properties": {
           "transactionId": {
             "type": "string"
@@ -90562,6 +90566,7 @@
       },
       "GameErrorRequest": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string? | optional |\n| gameId | string? | optional |\n| playerId | number? | optional |\n| errorCode | string | required |\n| errorMessage | string? | optional |\n| errorData | object? | optional |\n| roundId | string? | optional |\n| deviceInfo | string? | optional |\n| severity | string | default \"ERROR\" |",
         "properties": {
           "sessionId": {
             "nullable": true,
@@ -90609,6 +90614,7 @@
       },
       "JackpotWinRequest": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | required |\n| gameId | string | required |\n| playerId | number? | optional |\n| amount | number | required, positive |\n| currency | string | required |\n| jackpotType | string | required |\n| roundId | string? | optional |\n| providerTransactionId | string? | optional |\n| jackpotId | string? | optional |\n| jackpotLevel | string? | optional |\n| deviceInfo | string? | optional |",
         "properties": {
           "sessionId": {
             "type": "string"
@@ -90662,6 +90668,7 @@
       },
       "JackpotWinResponse": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| transactionId | string | internal transaction id |\n| sessionId | string | session id |\n| jackpotType | string | jackpot type |\n| amount | number | jackpot amount |\n| newBalance | number | balance after credit |\n| status | string | OK/ERROR (service-defined) |\n| timestamp | string | ISO date-time |\n| message | string? | optional |",
         "properties": {
           "transactionId": {
             "type": "string"
@@ -90704,6 +90711,7 @@
       },
       "SessionRecoveryRequest": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | required |\n| playerId | number? | optional |\n| deviceId | string? | optional |\n| deviceInfo | string? | optional |\n| browserInfo | string? | optional |\n| ipAddress | string? | optional |",
         "properties": {
           "sessionId": {
             "type": "string"
@@ -90736,6 +90744,7 @@
       },
       "SessionRecoveryResponse": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | session id |\n| status | string | OK/ERROR (service-defined) |\n| gameState | string? | optional |\n| balance | number | current balance |\n| lastRoundId | string? | optional |\n| recoveryToken | string | recovery token |\n| resumeUrl | string? | optional |\n| timestamp | string | ISO date-time |\n| expiresAt | string | ISO date-time |",
         "properties": {
           "sessionId": {
             "type": "string"
@@ -90782,6 +90791,7 @@
       },
       "SessionTransferRequest": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | required |\n| playerId | number? | optional |\n| newDeviceId | string | required |\n| previousDeviceId | string? | optional |\n| deviceInfo | string? | optional |\n| browserInfo | string? | optional |\n| ipAddress | string? | optional |",
         "properties": {
           "sessionId": {
             "type": "string"
@@ -90818,6 +90828,7 @@
       },
       "SessionTransferResponse": {
         "type": "object",
+        "description": "Schema table:\n| Field | Type | Notes |\n| --- | --- | --- |\n| sessionId | string | session id |\n| status | string | OK/ERROR (service-defined) |\n| transferToken | string | transfer token |\n| resumeUrl | string | resume URL |\n| gameState | string? | optional |\n| balance | number | current balance |\n| timestamp | string | ISO date-time |\n| expiresAt | string | ISO date-time |",
         "properties": {
           "sessionId": {
             "type": "string"

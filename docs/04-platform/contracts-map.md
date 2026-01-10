@@ -815,6 +815,15 @@ This document maps the backend OpenAPI surface to controllers. It is generated f
 | POST | `/api/callbacks/session-recovery` | Handle session recovery requests | GameCallbackController | `GameCallbackController_handleSessionRecovery_post_api_callbacks_session_recovery` |
 | POST | `/api/callbacks/session-transfer` | Handle session transfer between devices | GameCallbackController | `GameCallbackController_handleSessionTransfer_post_api_callbacks_session_transfer` |
 
+Schema references (OpenAPI):
+- `specs/openapi/casino-core.json` components:
+  - `GameResultRequest`, `GameResultResponse`
+  - `BalanceUpdateRequest`, `BalanceUpdateResponse`
+  - `GameErrorRequest`
+  - `JackpotWinRequest`, `JackpotWinResponse`
+  - `SessionRecoveryRequest`, `SessionRecoveryResponse`
+  - `SessionTransferRequest`, `SessionTransferResponse`
+
 ## GameCategory
 
 | Method | Path | Summary | Controller | Operation ID |
@@ -1007,6 +1016,9 @@ This document maps the backend OpenAPI surface to controllers. It is generated f
 | POST | `/api/callbacks/legacy/error` | Handle game errors (legacy) | LegacyGameCallbackController | `LegacyGameCallbackController_handleGameError_post_api_callbacks_legacy_error` |
 | POST | `/api/callbacks/legacy/game-round` | Receive game round results (legacy) | LegacyGameCallbackController | `LegacyGameCallbackController_handleGameRound_post_api_callbacks_legacy_game_round` |
 | POST | `/api/callbacks/legacy/jackpot` | Handle jackpot wins (legacy) | LegacyGameCallbackController | `LegacyGameCallbackController_handleJackpotWin_post_api_callbacks_legacy_jackpot` |
+
+Schema references (OpenAPI):
+- `specs/openapi/casino-core.json` uses generic object payloads for legacy callbacks.
 
 ## LocaleAdmin
 
@@ -1775,4 +1787,3 @@ This document maps the backend OpenAPI surface to controllers. It is generated f
 | GET | `/api/admin/widget-translations/keys/{translationKey}/widgets` | getWidgetsUsingTranslationKey | WidgetTranslationController | `WidgetTranslationController_getWidgetsUsingTranslationKey_get_api_admin_widget_translations_keys_translationKey_widgets` |
 | GET | `/api/admin/widget-translations/widgets/{widgetId}/keys` | getWidgetTranslationKeys | WidgetTranslationController | `WidgetTranslationController_getWidgetTranslationKeys_get_api_admin_widget_translations_widgets_widgetId_keys` |
 | POST | `/api/admin/widget-translations/widgets/{widgetId}/preview` | previewWidgetWithTranslations | WidgetTranslationController | `WidgetTranslationController_previewWidgetWithTranslations_post_api_admin_widget_translations_widgets_widgetId_preview` |
-
