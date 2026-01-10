@@ -1,0 +1,2346 @@
+asyncapi: 2.6.0
+info:
+  title: Smartico Kafka Events
+  version: 1.0.0
+  description: Kafka event schemas for Smartico CRM integration derived from casino-b code.
+servers:
+  kafka:
+    url: kafka://localhost:9092
+    protocol: kafka
+channels:
+  casino.player.registered.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerRegisteredEvent'
+  casino.player.profile-updated.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerProfileUpdatedEvent'
+  casino.player.status-changed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerStatusChangedEvent'
+  casino.player.authenticated.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerAuthenticatedEvent'
+  casino.player.session-started.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerSessionEvent'
+  casino.player.session-ended.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerSessionEvent'
+  casino.payment.deposit-created.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/DepositEvent'
+  casino.payment.deposit-completed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/DepositEvent'
+  casino.payment.deposit-failed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/DepositEvent'
+  casino.payment.withdrawal-created.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/WithdrawalEvent'
+  casino.payment.withdrawal-completed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/WithdrawalEvent'
+  casino.payment.withdrawal-failed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/WithdrawalEvent'
+  casino.payment.refund-processed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/GenericEvent'
+  casino.game.session-started.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/GameSessionStartedEvent'
+  casino.game.session-ended.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/GenericEvent'
+  casino.game.bet-placed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BetPlacedEvent'
+  casino.game.win-awarded.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BetWinEvent'
+  casino.game.round-completed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/GameRoundCompletedEvent'
+  casino.game.jackpot-won.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/JackpotWinEvent'
+  casino.sports.bet-placed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/SportsBetPlacedEvent'
+  casino.sports.bet-settled.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/SportsBetSettledEvent'
+  casino.bonus.offered.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusOfferedEvent'
+  casino.bonus.activated.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusActivatedEvent'
+  casino.bonus.awarded.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusAwardedEvent'
+  casino.bonus.wagering-updated.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusWageringUpdatedEvent'
+  casino.bonus.wagering-completed.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusCompletedEvent'
+  casino.bonus.expired.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/GenericEvent'
+  casino.bonus.converted.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusConvertedEvent'
+  casino.bonus.forfeited.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/BonusForfeitedEvent'
+  casino.compliance.kyc-submitted.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/KycSubmittedEvent'
+  casino.compliance.kyc-approved.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/KycApprovedEvent'
+  casino.compliance.kyc-rejected.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/KycRejectedEvent'
+  casino.compliance.level-upgraded.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/VerificationLevelUpgradeEvent'
+  casino.compliance.limit-set.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerLimitSetEvent'
+  casino.compliance.limit-reached.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerLimitReachedEvent'
+  casino.compliance.self-excluded.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/SelfExclusionEvent'
+  casino.compliance.cooling-off.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/CoolingOffEvent'
+  casino.compliance.reality-check.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/RealityCheckEvent'
+  casino.engagement.email-verified.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/EmailVerifiedEvent'
+  casino.engagement.phone-verified.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PhoneVerifiedEvent'
+  casino.engagement.2fa-enabled.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/TwoFactorEnabledEvent'
+  casino.engagement.preferences-updated.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PreferencesUpdatedEvent'
+  casino.engagement.login.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerLoginEvent'
+  casino.engagement.logout.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/PlayerLogoutEvent'
+  casino.dlq.all.v1:
+    publish:
+      message:
+        $ref: '#/components/messages/GenericEvent'
+components:
+  messages:
+    PlayerRegisteredEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerRegisteredEvent'
+    PlayerProfileUpdatedEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerProfileUpdatedEvent'
+    PlayerStatusChangedEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerStatusChangedEvent'
+    PlayerAuthenticatedEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerAuthenticatedEvent'
+    PlayerSessionEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerSessionEvent'
+    DepositEvent:
+      payload:
+        $ref: '#/components/schemas/DepositEvent'
+    WithdrawalEvent:
+      payload:
+        $ref: '#/components/schemas/WithdrawalEvent'
+    GameSessionStartedEvent:
+      payload:
+        $ref: '#/components/schemas/GameSessionStartedEvent'
+    BetPlacedEvent:
+      payload:
+        $ref: '#/components/schemas/BetPlacedEvent'
+    BetWinEvent:
+      payload:
+        $ref: '#/components/schemas/BetWinEvent'
+    GameRoundCompletedEvent:
+      payload:
+        $ref: '#/components/schemas/GameRoundCompletedEvent'
+    JackpotWinEvent:
+      payload:
+        $ref: '#/components/schemas/JackpotWinEvent'
+    SportsBetPlacedEvent:
+      payload:
+        $ref: '#/components/schemas/SportsBetPlacedEvent'
+    SportsBetSettledEvent:
+      payload:
+        $ref: '#/components/schemas/SportsBetSettledEvent'
+    BonusOfferedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusOfferedEvent'
+    BonusActivatedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusActivatedEvent'
+    BonusAwardedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusAwardedEvent'
+    BonusWageringUpdatedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusWageringUpdatedEvent'
+    BonusCompletedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusCompletedEvent'
+    BonusConvertedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusConvertedEvent'
+    BonusForfeitedEvent:
+      payload:
+        $ref: '#/components/schemas/BonusForfeitedEvent'
+    KycSubmittedEvent:
+      payload:
+        $ref: '#/components/schemas/KycSubmittedEvent'
+    KycApprovedEvent:
+      payload:
+        $ref: '#/components/schemas/KycApprovedEvent'
+    KycRejectedEvent:
+      payload:
+        $ref: '#/components/schemas/KycRejectedEvent'
+    VerificationLevelUpgradeEvent:
+      payload:
+        $ref: '#/components/schemas/VerificationLevelUpgradeEvent'
+    PlayerLimitSetEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerLimitSetEvent'
+    PlayerLimitReachedEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerLimitReachedEvent'
+    SelfExclusionEvent:
+      payload:
+        $ref: '#/components/schemas/SelfExclusionEvent'
+    CoolingOffEvent:
+      payload:
+        $ref: '#/components/schemas/CoolingOffEvent'
+    EmailVerifiedEvent:
+      payload:
+        $ref: '#/components/schemas/EmailVerifiedEvent'
+    PhoneVerifiedEvent:
+      payload:
+        $ref: '#/components/schemas/PhoneVerifiedEvent'
+    TwoFactorEnabledEvent:
+      payload:
+        $ref: '#/components/schemas/TwoFactorEnabledEvent'
+    PreferencesUpdatedEvent:
+      payload:
+        $ref: '#/components/schemas/PreferencesUpdatedEvent'
+    PlayerLoginEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerLoginEvent'
+    PlayerLogoutEvent:
+      payload:
+        $ref: '#/components/schemas/PlayerLogoutEvent'
+    RealityCheckEvent:
+      payload:
+        $ref: '#/components/schemas/RealityCheckEvent'
+    GenericEvent:
+      payload:
+        $ref: '#/components/schemas/GenericEvent'
+  schemas:
+    EventMetadata:
+      type: object
+      properties:
+        sourceSystem:
+          type: string
+        environment:
+          type: string
+        ipAddress:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        deviceType:
+          type: string
+          nullable: true
+        platform:
+          type: string
+          nullable: true
+      required: [sourceSystem, environment]
+    BaseEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        eventType:
+          type: string
+        eventTimestamp:
+          type: string
+        eventVersion:
+          type: string
+        brandId:
+          type: string
+        userId:
+          type: string
+        sessionId:
+          type: string
+          nullable: true
+        metadata:
+          $ref: '#/components/schemas/EventMetadata'
+      required: [eventId, eventType, eventTimestamp, eventVersion, brandId, userId, metadata]
+    GenericEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              type: object
+          required: [payload]
+    PlayerRegisteredEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - $ref: '#/components/schemas/PlayerRegisteredPayload'
+    PlayerRegisteredPayload:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        dateOfBirth:
+          type: string
+        phoneNumber:
+          type: string
+          nullable: true
+        registrationIp:
+          type: string
+        walletCurrency:
+          type: string
+        language:
+          type: string
+        country:
+          type: string
+        affiliateId:
+          type: string
+          nullable: true
+        signUpCode:
+          type: string
+          nullable: true
+        marketingOptIn:
+          type: boolean
+        emailMarketing:
+          type: boolean
+        smsMarketing:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        registrationSource:
+          type: string
+        registrationDevice:
+          type: string
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        dt_update:
+          type: string
+        core_registration_date:
+          type: string
+        core_account_status:
+          type: string
+        core_user_language:
+          type: string
+        core_wallet_currency:
+          type: string
+        core_username:
+          type: string
+        user_birthdate:
+          type: string
+          nullable: true
+        user_country:
+          type: string
+          nullable: true
+        user_email:
+          type: string
+          nullable: true
+        user_phone:
+          type: string
+          nullable: true
+        user_first_name:
+          type: string
+          nullable: true
+        user_last_name:
+          type: string
+          nullable: true
+        core_affiliate_id:
+          type: string
+          nullable: true
+        core_is_email_disabled_by_platform:
+          type: boolean
+        core_is_sms_disabled_by_platform:
+          type: boolean
+        core_kyc_status:
+          type: string
+          nullable: true
+      required:
+        - username
+        - email
+        - firstName
+        - lastName
+        - dateOfBirth
+        - registrationIp
+        - walletCurrency
+        - language
+        - country
+        - marketingOptIn
+        - emailMarketing
+        - smsMarketing
+        - pushNotifications
+        - registrationSource
+        - registrationDevice
+        - user_ext_id
+        - ext_brand_id
+        - dt_update
+        - core_registration_date
+        - core_account_status
+        - core_user_language
+        - core_wallet_currency
+        - core_username
+        - core_is_email_disabled_by_platform
+        - core_is_sms_disabled_by_platform
+    PlayerProfileUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerProfileUpdatedPayload'
+          required: [payload]
+    PlayerProfileUpdatedPayload:
+      type: object
+      properties:
+        updatedFields:
+          type: object
+        previousValues:
+          type: object
+          nullable: true
+        updateReason:
+          type: string
+          nullable: true
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        dt_update:
+          type: string
+        core_account_status:
+          type: string
+          nullable: true
+        core_user_language:
+          type: string
+          nullable: true
+        core_username:
+          type: string
+          nullable: true
+        core_kyc_status:
+          type: string
+          nullable: true
+      required: [updatedFields, user_ext_id, ext_brand_id, dt_update]
+    PlayerStatusChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerStatusChangedPayload'
+          required: [payload]
+    PlayerStatusChangedPayload:
+      type: object
+      properties:
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        triggeredBy:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required: [previousStatus, newStatus]
+    PlayerAuthenticatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerAuthenticatedPayload'
+          required: [payload]
+    PlayerAuthenticatedPayload:
+      type: object
+      properties:
+        username:
+          type: string
+        loginMethod:
+          type: string
+        twoFactorUsed:
+          type: boolean
+        device:
+          type: string
+        platform:
+          type: string
+        isNewDevice:
+          type: boolean
+          nullable: true
+        lastLoginAt:
+          type: string
+          nullable: true
+      required: [username, loginMethod, twoFactorUsed, device, platform]
+    PlayerSessionEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerSessionPayload'
+          required: [payload]
+    PlayerSessionPayload:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        sessionStartTime:
+          type: string
+          nullable: true
+        sessionEndTime:
+          type: string
+          nullable: true
+        sessionDurationSeconds:
+          type: integer
+          nullable: true
+        device:
+          type: string
+        platform:
+          type: string
+        gamesPlayed:
+          type: integer
+          nullable: true
+        totalBets:
+          type: string
+          nullable: true
+        totalWins:
+          type: string
+          nullable: true
+        netResult:
+          type: string
+          nullable: true
+      required: [sessionId, device, platform]
+    DepositEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/DepositPayload'
+          required: [payload]
+    DepositPayload:
+      type: object
+      properties:
+        paymentId:
+          type: string
+        transactionId:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        originalAmount:
+          type: string
+          nullable: true
+        originalCurrency:
+          type: string
+          nullable: true
+        exchangeRate:
+          type: string
+          nullable: true
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+        providerTransactionId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        declineReason:
+          type: string
+          nullable: true
+        processingFeeAmount:
+          type: string
+          nullable: true
+        processingFeeCurrency:
+          type: string
+          nullable: true
+        isFirstDeposit:
+          type: boolean
+        depositNumber:
+          type: integer
+        bonusEligible:
+          type: boolean
+        bonusCode:
+          type: string
+          nullable: true
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        dt_finalized:
+          type: string
+        deposit_status:
+          type: string
+        payment_method:
+          type: string
+        provider_name:
+          type: string
+        deposit_code:
+          type: string
+          nullable: true
+      required:
+        - paymentId
+        - transactionId
+        - amount
+        - currency
+        - paymentMethod
+        - paymentProvider
+        - status
+        - isFirstDeposit
+        - depositNumber
+        - bonusEligible
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - user_ext_id
+        - ext_brand_id
+        - dt_finalized
+        - deposit_status
+        - payment_method
+        - provider_name
+    WithdrawalEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/WithdrawalPayload'
+          required: [payload]
+    WithdrawalPayload:
+      type: object
+      properties:
+        paymentId:
+          type: string
+        transactionId:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+        providerTransactionId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        declineReason:
+          type: string
+          nullable: true
+        processingFeeAmount:
+          type: string
+          nullable: true
+        kycRequired:
+          type: boolean
+        kycStatus:
+          type: string
+          nullable: true
+        verificationLevel:
+          type: string
+          nullable: true
+        isFirstWithdrawal:
+          type: boolean
+        withdrawalNumber:
+          type: integer
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        estimatedProcessingTime:
+          type: string
+          nullable: true
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        dt_finalized:
+          type: string
+        withdrawal_status:
+          type: string
+        withdrawal_method:
+          type: string
+        provider_name:
+          type: string
+      required:
+        - paymentId
+        - transactionId
+        - amount
+        - currency
+        - paymentMethod
+        - paymentProvider
+        - status
+        - kycRequired
+        - isFirstWithdrawal
+        - withdrawalNumber
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - user_ext_id
+        - ext_brand_id
+        - dt_finalized
+        - withdrawal_status
+        - withdrawal_method
+        - provider_name
+    GameSessionStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/GameSessionStartedPayload'
+          required: [payload]
+    GameSessionStartedPayload:
+      type: object
+      properties:
+        gameSessionId:
+          type: string
+        gameId:
+          type: string
+        gameName:
+          type: string
+        gameType:
+          type: string
+        gameProvider:
+          type: string
+        currency:
+          type: string
+        walletBalance:
+          type: string
+        deviceType:
+          type: string
+        platform:
+          type: string
+        activeBonusId:
+          type: string
+          nullable: true
+        isFreeSpins:
+          type: boolean
+        freeSpinsRemaining:
+          type: integer
+          nullable: true
+        timestamp:
+          type: string
+      required: [gameSessionId, gameId, gameName, gameType, gameProvider, currency, walletBalance, deviceType, platform, isFreeSpins, timestamp]
+    BetPlacedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BetPlacedPayload'
+          required: [payload]
+    BetPlacedPayload:
+      type: object
+      properties:
+        gameSessionId:
+          type: string
+        gameRoundId:
+          type: string
+        gameId:
+          type: string
+        gameName:
+          type: string
+        gameType:
+          type: string
+        gameProvider:
+          type: string
+        betAmount:
+          type: string
+        currency:
+          type: string
+        betType:
+          type: string
+          nullable: true
+        betDetails:
+          type: object
+          nullable: true
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        bonusBalanceUsed:
+          type: string
+          nullable: true
+        freespinUsed:
+          type: boolean
+        jackpotContribution:
+          type: string
+          nullable: true
+        roundNumber:
+          type: integer
+          nullable: true
+        timestamp:
+          type: string
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        bet_date:
+          type: string
+        bet_amount_real:
+          type: string
+        bet_amount_bonus:
+          type: string
+        game_name:
+          type: string
+        game_id:
+          type: string
+        game_category:
+          type: string
+        game_provider:
+          type: string
+        casino_game_ext_id:
+          type: string
+          nullable: true
+        casino_game_type_ext_id:
+          type: string
+          nullable: true
+        casino_game_provider_ext_id:
+          type: string
+          nullable: true
+      required:
+        - gameSessionId
+        - gameRoundId
+        - gameId
+        - gameName
+        - gameType
+        - gameProvider
+        - betAmount
+        - currency
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - freespinUsed
+        - timestamp
+        - user_ext_id
+        - ext_brand_id
+        - bet_date
+        - bet_amount_real
+        - bet_amount_bonus
+        - game_name
+        - game_id
+        - game_category
+        - game_provider
+    BetWinEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BetWinPayload'
+          required: [payload]
+    BetWinPayload:
+      type: object
+      properties:
+        gameSessionId:
+          type: string
+        gameRoundId:
+          type: string
+        gameId:
+          type: string
+        gameName:
+          type: string
+        gameType:
+          type: string
+        gameProvider:
+          type: string
+        betAmount:
+          type: string
+        winAmount:
+          type: string
+        currency:
+          type: string
+        netResult:
+          type: string
+        multiplier:
+          type: string
+          nullable: true
+        winType:
+          type: string
+        isJackpot:
+          type: boolean
+        jackpotType:
+          type: string
+          nullable: true
+        jackpotAmount:
+          type: string
+          nullable: true
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        bonusBalanceAdded:
+          type: string
+          nullable: true
+        roundNumber:
+          type: integer
+          nullable: true
+        timestamp:
+          type: string
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        bet_date:
+          type: string
+        bet_amount_real:
+          type: string
+        bet_amount_bonus:
+          type: string
+        win_amount_real:
+          type: string
+        win_amount_bonus:
+          type: string
+        game_name:
+          type: string
+        game_id:
+          type: string
+        game_category:
+          type: string
+        game_provider:
+          type: string
+        casino_game_ext_id:
+          type: string
+          nullable: true
+        casino_game_type_ext_id:
+          type: string
+          nullable: true
+        casino_game_provider_ext_id:
+          type: string
+          nullable: true
+      required:
+        - gameSessionId
+        - gameRoundId
+        - gameId
+        - gameName
+        - gameType
+        - gameProvider
+        - betAmount
+        - winAmount
+        - currency
+        - netResult
+        - winType
+        - isJackpot
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - timestamp
+        - user_ext_id
+        - ext_brand_id
+        - bet_date
+        - bet_amount_real
+        - bet_amount_bonus
+        - win_amount_real
+        - win_amount_bonus
+        - game_name
+        - game_id
+        - game_category
+        - game_provider
+    GameRoundCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/GameRoundCompletedPayload'
+          required: [payload]
+    GameRoundCompletedPayload:
+      type: object
+      properties:
+        gameSessionId:
+          type: string
+        gameRoundId:
+          type: string
+        gameId:
+          type: string
+        gameName:
+          type: string
+        gameType:
+          type: string
+        gameProvider:
+          type: string
+        roundNumber:
+          type: integer
+        betAmount:
+          type: string
+        winAmount:
+          type: string
+        currency:
+          type: string
+        netResult:
+          type: string
+        roundOutcome:
+          type: string
+        roundDurationSeconds:
+          type: integer
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        bonusWageringProgress:
+          type: string
+          nullable: true
+        roundStartTime:
+          type: string
+        roundEndTime:
+          type: string
+        gameSpecificData:
+          type: object
+          nullable: true
+      required:
+        - gameSessionId
+        - gameRoundId
+        - gameId
+        - gameName
+        - gameType
+        - gameProvider
+        - roundNumber
+        - betAmount
+        - winAmount
+        - currency
+        - netResult
+        - roundOutcome
+        - roundDurationSeconds
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - roundStartTime
+        - roundEndTime
+    JackpotWinEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/JackpotWinPayload'
+          required: [payload]
+    JackpotWinPayload:
+      type: object
+      properties:
+        gameSessionId:
+          type: string
+        gameRoundId:
+          type: string
+        gameId:
+          type: string
+        gameName:
+          type: string
+        gameProvider:
+          type: string
+        jackpotId:
+          type: string
+        jackpotName:
+          type: string
+        jackpotType:
+          type: string
+        jackpotAmount:
+          type: string
+        currency:
+          type: string
+        triggeringBetAmount:
+          type: string
+        jackpotPoolBefore:
+          type: string
+          nullable: true
+        jackpotPoolAfter:
+          type: string
+          nullable: true
+        isProgressive:
+          type: boolean
+        networkJackpot:
+          type: boolean
+        playerUsername:
+          type: string
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - gameSessionId
+        - gameRoundId
+        - gameId
+        - gameName
+        - gameProvider
+        - jackpotId
+        - jackpotName
+        - jackpotType
+        - jackpotAmount
+        - currency
+        - triggeringBetAmount
+        - isProgressive
+        - networkJackpot
+        - playerUsername
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - timestamp
+    SportsBetPlacedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/SportsBetPlacedPayload'
+          required: [payload]
+    SportsBetPlacedPayload:
+      type: object
+      properties:
+        betId:
+          type: string
+        betType:
+          type: string
+        betAmount:
+          type: string
+        currency:
+          type: string
+        totalOdds:
+          type: string
+        potentialWin:
+          type: string
+        selectionCount:
+          type: integer
+        selections:
+          type: array
+          items:
+            $ref: '#/components/schemas/BetSelection'
+        sport:
+          type: string
+        isCashoutEligible:
+          type: boolean
+        isLiveBet:
+          type: boolean
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        activeBonusId:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        bet_date:
+          type: string
+        bet_amount_real:
+          type: string
+        bet_amount_bonus:
+          type: string
+        sport_bet_ext_id:
+          type: string
+        sport_bet_type:
+          type: string
+        sport_bet_status:
+          type: string
+        sport_name:
+          type: string
+          nullable: true
+        freebet_id:
+          type: string
+          nullable: true
+        is_live:
+          type: boolean
+        total_odds_decimal:
+          type: string
+          nullable: true
+      required:
+        - betId
+        - betType
+        - betAmount
+        - currency
+        - totalOdds
+        - potentialWin
+        - selectionCount
+        - selections
+        - sport
+        - isCashoutEligible
+        - isLiveBet
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - timestamp
+        - user_ext_id
+        - ext_brand_id
+        - bet_date
+        - bet_amount_real
+        - bet_amount_bonus
+        - sport_bet_ext_id
+        - sport_bet_type
+        - sport_bet_status
+    BetSelection:
+      type: object
+      properties:
+        eventId:
+          type: string
+        eventName:
+          type: string
+        market:
+          type: string
+        selection:
+          type: string
+        odds:
+          type: string
+        eventStartTime:
+          type: string
+        league:
+          type: string
+          nullable: true
+        selection_ext_id:
+          type: string
+          nullable: true
+        event_ext_id:
+          type: string
+          nullable: true
+        sport_id:
+          type: string
+          nullable: true
+        category_id:
+          type: string
+          nullable: true
+        tournament_id:
+          type: string
+          nullable: true
+        is_live_selection:
+          type: boolean
+      required: [eventId, eventName, market, selection, odds, eventStartTime]
+    SportsBetSettledEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/SportsBetSettledPayload'
+          required: [payload]
+    SportsBetSettledPayload:
+      type: object
+      properties:
+        betId:
+          type: string
+        betType:
+          type: string
+        betAmount:
+          type: string
+        currency:
+          type: string
+        totalOdds:
+          type: string
+        settlementStatus:
+          type: string
+        winAmount:
+          type: string
+          nullable: true
+        netResult:
+          type: string
+        selectionCount:
+          type: integer
+        selectionsSettled:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettledSelection'
+        sport:
+          type: string
+        wasCashedOut:
+          type: boolean
+        cashoutAmount:
+          type: string
+          nullable: true
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        betPlacedAt:
+          type: string
+        settledAt:
+          type: string
+        timestamp:
+          type: string
+        user_ext_id:
+          type: string
+        ext_brand_id:
+          type: string
+        bet_date:
+          type: string
+        settlement_date:
+          type: string
+        bet_amount_real:
+          type: string
+        bet_amount_bonus:
+          type: string
+        win_amount_real:
+          type: string
+        win_amount_bonus:
+          type: string
+        sport_bet_ext_id:
+          type: string
+        sport_bet_type:
+          type: string
+        sport_bet_status:
+          type: string
+        sport_name:
+          type: string
+          nullable: true
+        freebet_id:
+          type: string
+          nullable: true
+        cashout_flag:
+          type: boolean
+        total_odds_decimal:
+          type: string
+          nullable: true
+        void_reason:
+          type: string
+          nullable: true
+      required:
+        - betId
+        - betType
+        - betAmount
+        - currency
+        - totalOdds
+        - settlementStatus
+        - netResult
+        - selectionCount
+        - selectionsSettled
+        - sport
+        - wasCashedOut
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - betPlacedAt
+        - settledAt
+        - timestamp
+        - user_ext_id
+        - ext_brand_id
+        - bet_date
+        - settlement_date
+        - bet_amount_real
+        - bet_amount_bonus
+        - win_amount_real
+        - win_amount_bonus
+        - sport_bet_ext_id
+        - sport_bet_type
+        - sport_bet_status
+    SettledSelection:
+      type: object
+      properties:
+        eventId:
+          type: string
+        eventName:
+          type: string
+        market:
+          type: string
+        selection:
+          type: string
+        odds:
+          type: string
+        status:
+          type: string
+        eventStartTime:
+          type: string
+        eventSettledTime:
+          type: string
+          nullable: true
+        league:
+          type: string
+          nullable: true
+        score:
+          type: string
+          nullable: true
+        selection_ext_id:
+          type: string
+          nullable: true
+        event_ext_id:
+          type: string
+          nullable: true
+        sport_id:
+          type: string
+          nullable: true
+        category_id:
+          type: string
+          nullable: true
+        tournament_id:
+          type: string
+          nullable: true
+        selection_status:
+          type: string
+          nullable: true
+        is_live_selection:
+          type: boolean
+      required: [eventId, eventName, market, selection, odds, status, eventStartTime]
+    BonusOfferedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusOfferedPayload'
+          required: [payload]
+    BonusOfferedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        bonusAmount:
+          type: string
+        currency:
+          type: string
+        wageringRequirement:
+          type: integer
+        wageringTarget:
+          type: string
+        expiryDays:
+          type: integer
+        expiresAt:
+          type: string
+        minimumDepositRequired:
+          type: string
+          nullable: true
+        gameRestrictions:
+          type: array
+          items:
+            type: string
+          nullable: true
+        maxBetLimit:
+          type: string
+          nullable: true
+        offeredReason:
+          type: string
+        campaignId:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+      required: [bonusId, bonusName, bonusType, bonusAmount, currency, wageringRequirement, wageringTarget, expiryDays, expiresAt, offeredReason, timestamp]
+    BonusActivatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusActivatedPayload'
+          required: [payload]
+    BonusActivatedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        bonusAmount:
+          type: string
+        currency:
+          type: string
+        wageringTarget:
+          type: string
+        wageringRemaining:
+          type: string
+        activationDelay:
+          type: integer
+          nullable: true
+        timestamp:
+          type: string
+      required: [bonusId, bonusName, bonusType, bonusAmount, currency, wageringTarget, wageringRemaining, timestamp]
+    BonusAwardedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusAwardedPayload'
+          required: [payload]
+    BonusAwardedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusTemplateId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        bonusAmount:
+          type: string
+        currency:
+          type: string
+        wageringRequirement:
+          type: string
+        wageringTarget:
+          type: string
+        bonusCode:
+          type: string
+          nullable: true
+        triggerType:
+          type: string
+        triggerEvent:
+          type: string
+          nullable: true
+        eligibilityCriteria:
+          type: object
+          nullable: true
+        validFrom:
+          type: string
+        validUntil:
+          type: string
+        maxWinCap:
+          type: string
+          nullable: true
+        gameRestrictions:
+          type: array
+          items:
+            type: string
+          nullable: true
+        minDepositRequired:
+          type: string
+          nullable: true
+        linkedDepositId:
+          type: string
+          nullable: true
+        isFirstBonus:
+          type: boolean
+        walletBalanceBefore:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - bonusId
+        - bonusTemplateId
+        - bonusName
+        - bonusType
+        - bonusAmount
+        - currency
+        - wageringRequirement
+        - wageringTarget
+        - triggerType
+        - validFrom
+        - validUntil
+        - isFirstBonus
+        - walletBalanceBefore
+        - timestamp
+    BonusWageringUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusWageringUpdatedPayload'
+          required: [payload]
+    BonusWageringUpdatedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        wageringTarget:
+          type: string
+        wageringCompleted:
+          type: string
+        wageringRemaining:
+          type: string
+        wageringPercentage:
+          type: integer
+        contributionAmount:
+          type: string
+        betCount:
+          type: integer
+        lastBetAmount:
+          type: string
+          nullable: true
+        lastBetGameId:
+          type: string
+          nullable: true
+        currency:
+          type: string
+        expiresAt:
+          type: string
+        timeRemainingSeconds:
+          type: integer
+        updateReason:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - bonusId
+        - bonusName
+        - bonusType
+        - wageringTarget
+        - wageringCompleted
+        - wageringRemaining
+        - wageringPercentage
+        - contributionAmount
+        - betCount
+        - currency
+        - expiresAt
+        - timeRemainingSeconds
+        - updateReason
+        - timestamp
+    BonusCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusCompletedPayload'
+          required: [payload]
+    BonusCompletedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        originalBonusAmount:
+          type: string
+        finalBonusBalance:
+          type: string
+        convertedAmount:
+          type: string
+        currency:
+          type: string
+        wageringCompleted:
+          type: string
+        wageringTarget:
+          type: string
+        totalBetsCount:
+          type: integer
+        totalGamesPlayed:
+          type: integer
+        timeToComplete:
+          type: integer
+        conversionRate:
+          type: string
+        maxWinCapApplied:
+          type: boolean
+        cappedAmount:
+          type: string
+          nullable: true
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        awardedAt:
+          type: string
+        completedAt:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - bonusId
+        - bonusName
+        - bonusType
+        - originalBonusAmount
+        - finalBonusBalance
+        - convertedAmount
+        - currency
+        - wageringCompleted
+        - wageringTarget
+        - totalBetsCount
+        - totalGamesPlayed
+        - timeToComplete
+        - conversionRate
+        - maxWinCapApplied
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - awardedAt
+        - completedAt
+        - timestamp
+    BonusConvertedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusConvertedPayload'
+          required: [payload]
+    BonusConvertedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        originalBonusAmount:
+          type: string
+        finalConvertedAmount:
+          type: string
+        conversionRate:
+          type: string
+        wageringCompleted:
+          type: string
+        wageringTarget:
+          type: string
+        totalBetsPlaced:
+          type: integer
+        gamesPlayed:
+          type: array
+          items:
+            type: string
+        currency:
+          type: string
+        activatedAt:
+          type: string
+        convertedAt:
+          type: string
+        durationDays:
+          type: integer
+        walletBalanceBefore:
+          type: string
+        walletBalanceAfter:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - bonusId
+        - bonusName
+        - bonusType
+        - originalBonusAmount
+        - finalConvertedAmount
+        - conversionRate
+        - wageringCompleted
+        - wageringTarget
+        - totalBetsPlaced
+        - gamesPlayed
+        - currency
+        - activatedAt
+        - convertedAt
+        - durationDays
+        - walletBalanceBefore
+        - walletBalanceAfter
+        - timestamp
+    BonusForfeitedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/BonusForfeitedPayload'
+          required: [payload]
+    BonusForfeitedPayload:
+      type: object
+      properties:
+        bonusId:
+          type: string
+        bonusName:
+          type: string
+        bonusType:
+          type: string
+        originalBonusAmount:
+          type: string
+        remainingBonusBalance:
+          type: string
+        currency:
+          type: string
+        wageringCompleted:
+          type: string
+        wageringRemaining:
+          type: string
+        wageringPercentage:
+          type: integer
+        forfeitReason:
+          type: string
+        forfeitedBy:
+          type: string
+        timeActive:
+          type: integer
+        totalBetsCount:
+          type: integer
+        awardedAt:
+          type: string
+        forfeitedAt:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+      required:
+        - bonusId
+        - bonusName
+        - bonusType
+        - originalBonusAmount
+        - remainingBonusBalance
+        - currency
+        - wageringCompleted
+        - wageringRemaining
+        - wageringPercentage
+        - forfeitReason
+        - forfeitedBy
+        - timeActive
+        - totalBetsCount
+        - awardedAt
+        - forfeitedAt
+        - timestamp
+    KycSubmittedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/KycSubmittedPayload'
+          required: [payload]
+    KycSubmittedPayload:
+      type: object
+      properties:
+        requestId:
+          type: string
+        verificationType:
+          type: string
+        documentTypes:
+          type: array
+          items:
+            type: string
+        documentCount:
+          type: integer
+        verificationLevel:
+          type: string
+          nullable: true
+        triggeredBy:
+          type: string
+        triggerAmount:
+          type: string
+          nullable: true
+        triggerCurrency:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+      required: [requestId, verificationType, documentTypes, documentCount, triggeredBy, submittedAt]
+    KycApprovedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/KycApprovedPayload'
+          required: [payload]
+    KycApprovedPayload:
+      type: object
+      properties:
+        requestId:
+          type: string
+        verificationType:
+          type: string
+        previousLevel:
+          type: string
+          nullable: true
+        newLevel:
+          type: string
+        approvedBy:
+          type: string
+        aiConfidenceScore:
+          type: string
+          nullable: true
+        processingTimeSeconds:
+          type: integer
+        submittedAt:
+          type: string
+        approvedAt:
+          type: string
+      required: [requestId, verificationType, newLevel, approvedBy, processingTimeSeconds, submittedAt, approvedAt]
+    KycRejectedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/KycRejectedPayload'
+          required: [payload]
+    KycRejectedPayload:
+      type: object
+      properties:
+        requestId:
+          type: string
+        verificationType:
+          type: string
+        rejectionReason:
+          type: string
+        rejectionDetails:
+          type: string
+          nullable: true
+        rejectedBy:
+          type: string
+        aiConfidenceScore:
+          type: string
+          nullable: true
+        canResubmit:
+          type: boolean
+        resubmitAfter:
+          type: string
+          nullable: true
+        processingTimeSeconds:
+          type: integer
+        submittedAt:
+          type: string
+        rejectedAt:
+          type: string
+      required: [requestId, verificationType, rejectionReason, rejectedBy, canResubmit, processingTimeSeconds, submittedAt, rejectedAt]
+    VerificationLevelUpgradeEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/VerificationLevelUpgradePayload'
+          required: [payload]
+    VerificationLevelUpgradePayload:
+      type: object
+      properties:
+        previousLevel:
+          type: string
+        newLevel:
+          type: string
+        triggerReason:
+          type: string
+        depositLimit:
+          type: string
+          nullable: true
+        withdrawalLimit:
+          type: string
+          nullable: true
+        monthlyLimit:
+          type: string
+          nullable: true
+        benefits:
+          type: array
+          items:
+            type: string
+      required: [previousLevel, newLevel, triggerReason, benefits]
+    PlayerLimitSetEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerLimitSetPayload'
+          required: [payload]
+    PlayerLimitSetPayload:
+      type: object
+      properties:
+        limitType:
+          type: string
+        limitPeriod:
+          type: string
+        limitAmount:
+          type: string
+          nullable: true
+        limitCurrency:
+          type: string
+          nullable: true
+        limitDuration:
+          type: string
+          nullable: true
+        previousLimit:
+          type: string
+          nullable: true
+        setBy:
+          type: string
+        effectiveFrom:
+          type: string
+        coolingOffPeriod:
+          type: string
+          nullable: true
+      required: [limitType, limitPeriod, setBy, effectiveFrom]
+    PlayerLimitReachedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerLimitReachedPayload'
+          required: [payload]
+    PlayerLimitReachedPayload:
+      type: object
+      properties:
+        limitType:
+          type: string
+        limitPeriod:
+          type: string
+        limitAmount:
+          type: string
+        limitCurrency:
+          type: string
+          nullable: true
+        currentAmount:
+          type: string
+        actionTaken:
+          type: string
+        resetAt:
+          type: string
+      required: [limitType, limitPeriod, limitAmount, currentAmount, actionTaken, resetAt]
+    SelfExclusionEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/SelfExclusionPayload'
+          required: [payload]
+    SelfExclusionPayload:
+      type: object
+      properties:
+        exclusionType:
+          type: string
+        duration:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        selectedOptions:
+          type: array
+          items:
+            type: string
+        startDate:
+          type: string
+        endDate:
+          type: string
+          nullable: true
+        canCancelEarly:
+          type: boolean
+        supportOffered:
+          type: boolean
+        helplineContacts:
+          type: array
+          items:
+            type: string
+      required: [exclusionType, selectedOptions, startDate, canCancelEarly, supportOffered, helplineContacts]
+    CoolingOffEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/CoolingOffPayload'
+          required: [payload]
+    CoolingOffPayload:
+      type: object
+      properties:
+        duration:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        startDate:
+          type: string
+        endDate:
+          type: string
+        canCancelEarly:
+          type: boolean
+        reminderSent:
+          type: boolean
+      required: [duration, startDate, endDate, canCancelEarly, reminderSent]
+    RealityCheckEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/RealityCheckPayload'
+          required: [payload]
+    RealityCheckPayload:
+      type: object
+      properties:
+        sessionDuration:
+          type: string
+        totalBets:
+          type: integer
+        totalWagered:
+          type: string
+        totalWon:
+          type: string
+        netPosition:
+          type: string
+        currency:
+          type: string
+        playerAction:
+          type: string
+        checkInterval:
+          type: string
+      required: [sessionDuration, totalBets, totalWagered, totalWon, netPosition, currency, playerAction, checkInterval]
+    EmailVerifiedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/EmailVerifiedPayload'
+          required: [payload]
+    EmailVerifiedPayload:
+      type: object
+      properties:
+        email:
+          type: string
+        verificationMethod:
+          type: string
+        verifiedAt:
+          type: string
+        daysSinceRegistration:
+          type: integer
+      required: [email, verificationMethod, verifiedAt, daysSinceRegistration]
+    PhoneVerifiedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PhoneVerifiedPayload'
+          required: [payload]
+    PhoneVerifiedPayload:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+        countryCode:
+          type: string
+        verificationMethod:
+          type: string
+        verifiedAt:
+          type: string
+        daysSinceRegistration:
+          type: integer
+      required: [phoneNumber, countryCode, verificationMethod, verifiedAt, daysSinceRegistration]
+    TwoFactorEnabledEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/TwoFactorEnabledPayload'
+          required: [payload]
+    TwoFactorEnabledPayload:
+      type: object
+      properties:
+        method:
+          type: string
+        enabledAt:
+          type: string
+        daysSinceRegistration:
+          type: integer
+        triggeredBy:
+          type: string
+      required: [method, enabledAt, daysSinceRegistration, triggeredBy]
+    PreferencesUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PreferencesUpdatedPayload'
+          required: [payload]
+    PreferencesUpdatedPayload:
+      type: object
+      properties:
+        preferencesChanged:
+          type: object
+        communicationPreferences:
+          $ref: '#/components/schemas/CommunicationPreferences'
+        gamePreferences:
+          $ref: '#/components/schemas/GamePreferences'
+        updatedAt:
+          type: string
+      required: [preferencesChanged, updatedAt]
+    PlayerLoginEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerLoginPayload'
+          required: [payload]
+    PlayerLoginPayload:
+      type: object
+      properties:
+        loginMethod:
+          type: string
+        ipAddress:
+          type: string
+        userAgent:
+          type: string
+        deviceType:
+          type: string
+        platform:
+          type: string
+        loginAt:
+          type: string
+        daysSinceLastLogin:
+          type: integer
+          nullable: true
+        isNewDevice:
+          type: boolean
+        failedAttempts:
+          type: integer
+      required: [loginMethod, ipAddress, userAgent, deviceType, platform, loginAt, isNewDevice, failedAttempts]
+    PlayerLogoutEvent:
+      allOf:
+        - $ref: '#/components/schemas/BaseEvent'
+        - type: object
+          properties:
+            payload:
+              $ref: '#/components/schemas/PlayerLogoutPayload'
+          required: [payload]
+    PlayerLogoutPayload:
+      type: object
+      properties:
+        sessionDuration:
+          type: string
+        totalBetsPlaced:
+          type: integer
+        totalDeposited:
+          type: string
+        totalWithdrawn:
+          type: string
+        currency:
+          type: string
+        logoutReason:
+          type: string
+        logoutAt:
+          type: string
+      required: [sessionDuration, totalBetsPlaced, totalDeposited, totalWithdrawn, currency, logoutReason, logoutAt]
+    CommunicationPreferences:
+      type: object
+      properties:
+        emailMarketing:
+          type: boolean
+        smsMarketing:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        bonusNotifications:
+          type: boolean
+        transactionAlerts:
+          type: boolean
+      required: [emailMarketing, smsMarketing, pushNotifications, bonusNotifications, transactionAlerts]
+    GamePreferences:
+      type: object
+      properties:
+        favoriteGameTypes:
+          type: array
+          items:
+            type: string
+        favoriteProviders:
+          type: array
+          items:
+            type: string
+        oddsFormat:
+          type: string
+          nullable: true
+        autoPlayEnabled:
+          type: boolean
+        soundEnabled:
+          type: boolean
+      required: [favoriteGameTypes, favoriteProviders, autoPlayEnabled, soundEnabled]

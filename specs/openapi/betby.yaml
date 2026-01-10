@@ -1,0 +1,756 @@
+openapi: 3.0.3
+info:
+  title: BetBy Sportsbook API (Inbound)
+  version: 1.0.0
+  description: BetBy sportsbook endpoints and payload schemas derived from casino-b code. Requests are JWT-encrypted in the payload field.
+servers:
+  - url: /
+paths:
+  /api/v1/sport/betby/ping:
+    get:
+      summary: Ping
+      responses:
+        '200':
+          description: Ping response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timestamp:
+                    type: integer
+                    format: int64
+                required: [timestamp]
+  /api/v1/sport/betby/bet/make:
+    post:
+      summary: Bet make (BET_MAKE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Bet make response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetMakeResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/win:
+    post:
+      summary: Bet win (BET_WIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Bet win response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetWinResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/lost:
+    post:
+      summary: Bet lost (BET_LOST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Bet lost response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetLostResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/refund:
+    post:
+      summary: Bet refund (BET_REFUND)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Bet refund response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetRefundResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/discard:
+    post:
+      summary: Bet discard (BET_DISCARD)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Discard accepted
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/rollback:
+    post:
+      summary: Bet rollback (BET_ROLLBACK)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Bet rollback response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetRollbackResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/commit:
+    post:
+      summary: Bet commit (BET_COMMIT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Commit accepted
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/bet/settlement:
+    post:
+      summary: Bet settlement (BET_SETTLEMENT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Settlement response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetSettlementResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/player-segment:
+    post:
+      summary: Player segment (PLAYER_SEGMENT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Player segment response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerSegmentResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+  /api/v1/sport/betby/status:
+    post:
+      summary: Transaction status (STATUS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPayloadRequest'
+      responses:
+        '200':
+          description: Status response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetStatusResponse'
+        '400':
+          description: BetBy error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetByErrorResponse'
+components:
+  schemas:
+    EncryptedPayloadRequest:
+      type: object
+      properties:
+        payload:
+          type: string
+          description: JWT token containing the encrypted BetBy request payload.
+      required: [payload]
+    BetByErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+      required: [code, message]
+    BetMakeResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        ext_transaction_id:
+          type: string
+        parent_transaction_id:
+          type: string
+          nullable: true
+        user_id:
+          type: string
+        operation:
+          type: string
+        amount:
+          type: number
+          description: Amount in subunits.
+        currency:
+          type: string
+        balance:
+          type: number
+        operator_bonus_amount:
+          type: number
+          nullable: true
+      required: [id, ext_transaction_id, user_id, operation, amount, currency, balance]
+    BetWinResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        ext_transaction_id:
+          type: string
+        parent_transaction_id:
+          type: string
+        user_id:
+          type: string
+        operation:
+          type: string
+        amount:
+          type: number
+          description: Amount in subunits.
+        currency:
+          type: string
+        balance:
+          type: number
+      required: [id, ext_transaction_id, parent_transaction_id, user_id, operation, amount, currency, balance]
+    BetLostResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        ext_transaction_id:
+          type: string
+        parent_transaction_id:
+          type: string
+        user_id:
+          type: string
+        operation:
+          type: string
+        balance:
+          type: number
+      required: [id, ext_transaction_id, parent_transaction_id, user_id, operation, balance]
+    BetRefundResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        ext_transaction_id:
+          type: string
+        parent_transaction_id:
+          type: string
+        user_id:
+          type: string
+        operation:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        balance:
+          type: number
+      required: [id, ext_transaction_id, parent_transaction_id, user_id, operation, amount, currency, balance]
+    BetRollbackResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        ext_transaction_id:
+          type: string
+        parent_transaction_id:
+          type: string
+        user_id:
+          type: string
+        operation:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        balance:
+          type: number
+      required: [id, ext_transaction_id, parent_transaction_id, user_id, operation, amount, currency, balance]
+    BetSettlementResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        ext_transaction_id:
+          type: string
+        bet_transaction_id:
+          type: string
+        user_id:
+          type: string
+        status:
+          type: string
+        balance:
+          type: number
+      required: [id, ext_transaction_id, bet_transaction_id, user_id, status, balance]
+    PlayerSegmentResponse:
+      type: object
+      properties:
+        playerId:
+          type: string
+        segment:
+          type: string
+        vipLevel:
+          type: integer
+        limits:
+          type: object
+          properties:
+            dailyWager:
+              type: number
+            dailyLimit:
+              type: number
+            monthlyWager:
+              type: number
+            monthlyLimit:
+              type: number
+        stats:
+          type: object
+          properties:
+            totalBets:
+              type: number
+            totalWins:
+              type: number
+            netAmount:
+              type: number
+      required: [playerId, segment, vipLevel, limits, stats]
+    BetStatusResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        status:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        createdAt:
+          type: string
+      required: [transactionId, status, amount, currency, createdAt]
+    BetMakeRequest:
+      type: object
+      description: Decrypted payload for BET_MAKE.
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+        player_id:
+          type: string
+        session_id:
+          type: string
+        bonus_id:
+          type: string
+          nullable: true
+        bonus_type:
+          type: string
+          nullable: true
+        transaction:
+          $ref: '#/components/schemas/TransactionItem'
+        betslip:
+          $ref: '#/components/schemas/BetSlipItem'
+        potential_win:
+          type: number
+        potential_comboboost_win:
+          type: number
+          nullable: true
+      required: [amount, currency, player_id, session_id, transaction, betslip, potential_win]
+    BetWinRequest:
+      type: object
+      description: Decrypted payload for BET_WIN.
+      properties:
+        player_id:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        currency:
+          type: string
+        is_cashout:
+          type: boolean
+        bet_transaction_id:
+          type: string
+        transaction:
+          $ref: '#/components/schemas/TransactionItem'
+        is_snr_lost:
+          type: boolean
+        selections:
+          type: array
+          items:
+            $ref: '#/components/schemas/SelectionItem'
+        odds:
+          type: string
+          nullable: true
+        bonus_id:
+          type: string
+          nullable: true
+        bonus_type:
+          type: string
+          nullable: true
+        comboboost_multiplier:
+          type: string
+          nullable: true
+        payout:
+          type: number
+          nullable: true
+      required: [amount, currency, bet_transaction_id, transaction]
+    BetLostRequest:
+      type: object
+      description: Decrypted payload for BET_LOST.
+      properties:
+        player_id:
+          type: string
+          nullable: true
+        bet_transaction_id:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        transaction:
+          $ref: '#/components/schemas/TransactionItem'
+        selections:
+          type: array
+          items:
+            $ref: '#/components/schemas/SelectionItem'
+      required: [bet_transaction_id, amount, currency, transaction]
+    BetRefundRequest:
+      type: object
+      description: Decrypted payload for BET_REFUND.
+      properties:
+        player_id:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        currency:
+          type: string
+        bet_transaction_id:
+          type: string
+        reason:
+          type: string
+        reason_code:
+          type: integer
+        bonus_id:
+          type: string
+          nullable: true
+        transaction:
+          $ref: '#/components/schemas/TransactionItem'
+      required: [amount, currency, bet_transaction_id, reason, reason_code, transaction]
+    BetRollbackRequest:
+      type: object
+      description: Decrypted payload for BET_ROLLBACK.
+      properties:
+        player_id:
+          type: string
+          nullable: true
+        currency:
+          type: string
+        original_transaction_id:
+          type: string
+        rollback_transaction_id:
+          type: string
+        bet_transaction_id:
+          type: string
+          nullable: true
+        parent_transaction_id:
+          type: string
+          nullable: true
+        transaction:
+          $ref: '#/components/schemas/TransactionItem'
+      required: [currency, original_transaction_id, rollback_transaction_id, transaction]
+    BetCommitRequest:
+      type: object
+      description: Decrypted payload for BET_COMMIT.
+      properties:
+        bet_transaction_id:
+          type: string
+        betslip:
+          $ref: '#/components/schemas/BetSlipCommitItem'
+        potential_win:
+          type: number
+          nullable: true
+      required: [bet_transaction_id]
+    BetSettlementRequest:
+      type: object
+      description: Decrypted payload for BET_SETTLEMENT.
+      properties:
+        bet_transaction_id:
+          type: string
+        status:
+          type: string
+        transaction:
+          $ref: '#/components/schemas/TransactionItem'
+      required: [bet_transaction_id, status]
+    BetDiscardRequest:
+      type: object
+      description: Decrypted payload for BET_DISCARD.
+      properties:
+        betslip_id:
+          type: string
+        player_id:
+          type: string
+          nullable: true
+        requested_at:
+          type: string
+          nullable: true
+      required: [betslip_id]
+    PlayerSegmentRequest:
+      type: object
+      description: Decrypted payload for PLAYER_SEGMENT.
+      properties:
+        brand_id:
+          type: string
+        brand_name:
+          type: string
+        player_id:
+          type: string
+        player_name:
+          type: string
+        external_player_id:
+          type: string
+        segment_name:
+          type: string
+        segment_ccf:
+          type: string
+      required: [brand_id, brand_name, player_id, player_name, external_player_id, segment_name, segment_ccf]
+    StatusRequest:
+      type: object
+      description: Decrypted payload for STATUS.
+      properties:
+        transaction_id:
+          type: string
+        requested_at:
+          type: string
+          nullable: true
+      required: [transaction_id]
+    TransactionItem:
+      type: object
+      properties:
+        id:
+          type: string
+        betslip_id:
+          type: string
+        player_id:
+          type: string
+        operator_id:
+          type: string
+        operator_brand_id:
+          type: string
+        ext_player_id:
+          type: string
+        timestamp:
+          type: number
+        amount:
+          type: number
+        currency:
+          type: string
+        cross_rate_euro:
+          type: string
+          nullable: true
+        operation:
+          type: string
+        bonus_id:
+          type: string
+          nullable: true
+        parent_transaction_id:
+          type: string
+          nullable: true
+      required: [id, betslip_id, player_id, operator_id, operator_brand_id, ext_player_id, timestamp, amount, currency, operation]
+    BetSlipItem:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: number
+        player_id:
+          type: string
+        operator_id:
+          type: string
+        operator_brand_id:
+          type: string
+        ext_player_id:
+          type: string
+        currency:
+          type: string
+        type:
+          type: string
+        sum:
+          type: number
+        k:
+          type: string
+        is_quick_bet:
+          type: boolean
+        accept_odds_change:
+          type: boolean
+        bets:
+          type: array
+          items:
+            $ref: '#/components/schemas/BetItem'
+      required: [id, timestamp, player_id, operator_id, operator_brand_id, ext_player_id, currency, type, sum, k, bets]
+    BetItem:
+      type: object
+      properties:
+        id:
+          type: string
+        event_id:
+          type: string
+        sport_id:
+          type: string
+          nullable: true
+        tournament_id:
+          type: string
+          nullable: true
+        category_id:
+          type: string
+          nullable: true
+        live:
+          type: boolean
+          nullable: true
+        sport_name:
+          type: string
+          nullable: true
+        category_name:
+          type: string
+          nullable: true
+        tournament_name:
+          type: string
+          nullable: true
+        competitor_name:
+          type: array
+          items:
+            type: string
+          nullable: true
+        market_name:
+          type: string
+          nullable: true
+        outcome_name:
+          type: string
+          nullable: true
+        scheduled:
+          type: integer
+          format: int64
+          nullable: true
+        odds:
+          type: string
+          nullable: true
+      required: [id, event_id]
+    SelectionItem:
+      type: object
+      properties:
+        id:
+          type: string
+        event_id:
+          type: string
+        status:
+          type: string
+        odds:
+          type: string
+          nullable: true
+      required: [id, event_id, status]
+    BetSlipCommitItem:
+      type: object
+      properties:
+        betslip_id:
+          type: string
+        selections:
+          type: array
+          items:
+            $ref: '#/components/schemas/BetSlipSelectionItem'
+          nullable: true
+      required: [betslip_id]
+    BetSlipSelectionItem:
+      type: object
+      properties:
+        selection_id:
+          type: string
+        odds:
+          type: number
+          nullable: true
+      required: [selection_id]

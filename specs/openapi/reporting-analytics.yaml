@@ -1,0 +1,1732 @@
+openapi: 3.0.3
+info:
+  title: Reporting and Analytics API
+  version: 1.0.0
+  description: Reporting, time series, daily breakdown, and analytics endpoints derived from casino-b code.
+servers:
+  - url: /
+paths:
+  /api/v1/reporting/dashboard:
+    get:
+      summary: Get dashboard metrics
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dashboard metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMetrics'
+  /api/v1/reporting/providers:
+    get:
+      summary: Get provider metrics
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderMetrics'
+  /api/v1/reporting/rankings:
+    get:
+      summary: Get player rankings
+      parameters:
+        - name: rankingType
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/RankingType'
+        - name: periodType
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PeriodType'
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Ranking list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlayerRankingInfo'
+  /api/v1/reporting/vendors/{vendorId}:
+    get:
+      summary: Get vendor metrics
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Vendor metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorMetricsDetail'
+  /api/v1/reporting/ftd:
+    get:
+      summary: Get FTD metrics
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: FTD summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FtdSummary'
+  /api/v1/reporting/ftd/conversion:
+    get:
+      summary: Get FTD conversion metrics
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversion metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FtdConversionMetrics'
+  /api/v1/reporting/ftd/cohort:
+    get:
+      summary: Get FTD cohort analysis
+      parameters:
+        - name: cohortMonth
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cohort list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FtdCohort'
+  /api/v1/reporting/cache/refresh:
+    post:
+      summary: Refresh reporting cache
+      parameters:
+        - name: cacheType
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/CacheType'
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cache refresh response
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/reporting/realtime:
+    get:
+      summary: Get real-time metrics
+      responses:
+        '200':
+          description: Real-time metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RealTimeMetrics'
+  /api/v1/reporting/summary:
+    get:
+      summary: Get summary statistics
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Summary statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryStatisticsResponse'
+  /api/v1/reporting/recalculate:
+    post:
+      summary: Recalculate reporting data
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Recalculation response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecalculationResponse'
+  /api/v1/reporting/timeseries/{metric}:
+    get:
+      summary: Get time series
+      parameters:
+        - name: metric
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/TimeSeriesMetricType'
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TimeSeriesGranularity'
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Time series data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeSeriesData'
+  /api/v1/reporting/timeseries/{metric}/compare:
+    get:
+      summary: Get comparative time series
+      parameters:
+        - name: metric
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/TimeSeriesMetricType'
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TimeSeriesGranularity'
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Comparative time series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComparativeTimeSeriesData'
+  /api/v1/reporting/timeseries/multi:
+    post:
+      summary: Get multiple metrics time series
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MultiMetricRequest'
+      responses:
+        '200':
+          description: Multi-metric time series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultiMetricTimeSeriesData'
+  /api/v1/reporting/timeseries/deposits/by-provider:
+    get:
+      summary: Deposits by provider time series
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TimeSeriesGranularity'
+        - name: providerId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Provider time series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderTimeSeriesResponse'
+  /api/v1/reporting/timeseries/withdrawals/by-provider:
+    get:
+      summary: Withdrawals by provider time series
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TimeSeriesGranularity'
+        - name: providerId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Provider time series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderTimeSeriesResponse'
+  /api/v1/reporting/timeseries/ggr/by-vendor:
+    get:
+      summary: GGR by vendor time series
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TimeSeriesGranularity'
+        - name: vendorId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Vendor time series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorTimeSeriesResponse'
+  /api/v1/reporting/timeseries/metrics:
+    get:
+      summary: Get available metrics
+      responses:
+        '200':
+          description: Metric list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MetricInfo'
+  /api/v1/reporting/timeseries/granularities:
+    get:
+      summary: Get available granularities
+      responses:
+        '200':
+          description: Granularity list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GranularityInfo'
+  /api/v1/reporting/daily-breakdown:
+    get:
+      summary: Get daily breakdown
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: sortBy
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sortOrder
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: includeSummary
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: includeComparison
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: metrics
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Daily breakdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyBreakdownResponse'
+  /api/v1/reporting/daily-breakdown/summary-cards:
+    get:
+      summary: Get summary cards
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Summary cards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DailyBreakdownSummaryCard'
+  /api/v1/reporting/daily-breakdown/export:
+    post:
+      summary: Export daily breakdown
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DailyBreakdownExportRequest'
+      responses:
+        '200':
+          description: Export file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/v1/reporting/daily-breakdown/recalculate:
+    post:
+      summary: Recalculate daily breakdown
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Recalculation response
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/reporting/daily-breakdown/available-metrics:
+    get:
+      summary: Get available metrics for daily breakdown
+      responses:
+        '200':
+          description: Metrics by category
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/reporting/daily-breakdown/date/{date}:
+    get:
+      summary: Get daily breakdown for date
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Daily breakdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyBreakdownResponse'
+  /api/v1/reporting/export/dashboard/excel:
+    get:
+      summary: Export dashboard to Excel
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Excel file
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+  /api/v1/reporting/export/timeseries/csv:
+    get:
+      summary: Export time series to CSV
+      parameters:
+        - name: metric
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/TimeSeriesMetricType'
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TimeSeriesGranularity'
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV content
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/v1/reporting/export/rankings/csv:
+    get:
+      summary: Export rankings to CSV
+      parameters:
+        - name: rankingType
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/RankingType'
+        - name: periodType
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PeriodType'
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: CSV content
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/v1/reporting/export/comprehensive/json:
+    get:
+      summary: Export comprehensive report to JSON
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JSON content
+          content:
+            application/json:
+              schema:
+                type: string
+  /api/v1/reporting/export/schedule:
+    post:
+      summary: Schedule report generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleReportRequest'
+      responses:
+        '200':
+          description: Schedule response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleReportResponse'
+  /api/v1/reporting/export/formats:
+    get:
+      summary: Get export formats
+      responses:
+        '200':
+          description: Export formats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExportFormatInfo'
+  /api/v1/reporting/export/history:
+    get:
+      summary: Get export history
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Export history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportHistoryResponse'
+  /api/admin/analytics/games/{gameId}:
+    get:
+      summary: Get game analytics
+      parameters:
+        - name: gameId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: countryCode
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Game analytics response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameAnalyticsResponse'
+  /api/admin/analytics/games/best-performing:
+    get:
+      summary: Get best performing games
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: countryCode
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of game analytics items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GameAnalyticsItem'
+  /api/admin/analytics/games/{gameId}/generate:
+    post:
+      summary: Generate game analytics
+      parameters:
+        - name: gameId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: countryCode
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Game analytics item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameAnalyticsItem'
+  /api/admin/analytics/games/generate-all:
+    post:
+      summary: Generate analytics for all games
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Result summary
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/admin/analytics/providers/{providerId}:
+    get:
+      summary: Get provider analytics
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider analytics response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAnalyticsResponse'
+  /api/admin/analytics/providers/best-performing:
+    get:
+      summary: Get best performing providers
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of provider analytics items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderAnalyticsItem'
+  /api/admin/analytics/providers/{providerId}/generate:
+    post:
+      summary: Generate provider analytics
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider analytics item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAnalyticsItem'
+  /api/admin/analytics/providers/generate-all:
+    post:
+      summary: Generate analytics for all providers
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Result summary
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    DashboardMetrics:
+      type: object
+      properties:
+        totalDeposits:
+          type: number
+        totalWithdrawals:
+          type: number
+        ggr:
+          type: number
+        ngr:
+          type: number
+        newRegistrations:
+          type: integer
+        ftdCount:
+          type: integer
+        activePlayers:
+          type: integer
+        depositsChange:
+          type: number
+        ggrChange:
+          type: number
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [totalDeposits, totalWithdrawals, ggr, ngr, newRegistrations, ftdCount, activePlayers, depositsChange, ggrChange, startDate, endDate]
+    ProviderMetrics:
+      type: object
+      properties:
+        providerName:
+          type: string
+        totalDeposits:
+          type: number
+        totalWithdrawals:
+          type: number
+        depositCount:
+          type: integer
+        withdrawalCount:
+          type: integer
+        averageDeposit:
+          type: number
+        netFlow:
+          type: number
+      required: [providerName, totalDeposits, totalWithdrawals, depositCount, withdrawalCount, averageDeposit, netFlow]
+    PlayerRankingInfo:
+      type: object
+      properties:
+        playerId:
+          type: integer
+        username:
+          type: string
+        value:
+          type: number
+        rankPosition:
+          type: integer
+        previousRank:
+          type: integer
+          nullable: true
+        change:
+          type: integer
+      required: [playerId, username, value, rankPosition, change]
+    VendorMetricsDetail:
+      type: object
+      properties:
+        vendorId:
+          type: integer
+        vendorName:
+          type: string
+        totalGgr:
+          type: number
+        totalNgr:
+          type: number
+        totalBets:
+          type: integer
+        totalWins:
+          type: integer
+        averageBetAmount:
+          type: number
+        playerCount:
+          type: integer
+        gameCount:
+          type: integer
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [vendorId, vendorName, totalGgr, totalNgr, totalBets, totalWins, averageBetAmount, playerCount, gameCount, startDate, endDate]
+    FtdSummary:
+      type: object
+      properties:
+        totalFtd:
+          type: integer
+        averageFtdAmount:
+          type: number
+        totalFtdAmount:
+          type: number
+        conversionRate:
+          type: number
+        averageDaysToDeposit:
+          type: number
+        sameDayDeposits:
+          type: integer
+        topProviders:
+          type: array
+          items:
+            $ref: '#/components/schemas/FtdProviderSummary'
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [totalFtd, averageFtdAmount, totalFtdAmount, conversionRate, averageDaysToDeposit, sameDayDeposits, topProviders, startDate, endDate]
+    FtdProviderSummary:
+      type: object
+      properties:
+        providerName:
+          type: string
+        ftdCount:
+          type: integer
+        averageAmount:
+          type: number
+      required: [providerName, ftdCount, averageAmount]
+    FtdConversionMetrics:
+      type: object
+      properties:
+        totalRegistrations:
+          type: integer
+        convertedToFtd:
+          type: integer
+        conversionRate:
+          type: number
+        averageDaysToDeposit:
+          type: number
+      required: [totalRegistrations, convertedToFtd, conversionRate, averageDaysToDeposit]
+    FtdCohort:
+      type: object
+      properties:
+        registrationDate:
+          type: string
+        registeredPlayers:
+          type: integer
+        day0Ftd:
+          type: integer
+        day1To7Ftd:
+          type: integer
+        day8To30Ftd:
+          type: integer
+        day30PlusFtd:
+          type: integer
+        averageFtdAmount:
+          type: number
+      required: [registrationDate, registeredPlayers, day0Ftd, day1To7Ftd, day8To30Ftd, day30PlusFtd, averageFtdAmount]
+    RealTimeMetrics:
+      type: object
+      properties:
+        depositsLastHour:
+          type: number
+        withdrawalsLastHour:
+          type: number
+        ggrLastHour:
+          type: number
+        activePlayersLastHour:
+          type: integer
+        timestamp:
+          type: string
+      required: [depositsLastHour, withdrawalsLastHour, ggrLastHour, activePlayersLastHour, timestamp]
+    TimeSeriesData:
+      type: object
+      properties:
+        metric:
+          $ref: '#/components/schemas/TimeSeriesMetricType'
+        granularity:
+          $ref: '#/components/schemas/TimeSeriesGranularity'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesPoint'
+        startDate:
+          type: string
+        endDate:
+          type: string
+        statistics:
+          $ref: '#/components/schemas/TimeSeriesStatistics'
+      required: [metric, granularity, points, startDate, endDate, statistics]
+    TimeSeriesPoint:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        value:
+          type: number
+      required: [timestamp, value]
+    TimeSeriesStatistics:
+      type: object
+      properties:
+        min:
+          type: number
+        max:
+          type: number
+        avg:
+          type: number
+        sum:
+          type: number
+        count:
+          type: integer
+      required: [min, max, avg, sum, count]
+    ComparativeTimeSeriesData:
+      type: object
+      properties:
+        current:
+          $ref: '#/components/schemas/TimeSeriesData'
+        previous:
+          $ref: '#/components/schemas/TimeSeriesData'
+        changePercentage:
+          type: number
+      required: [current, previous, changePercentage]
+    MultiMetricTimeSeriesData:
+      type: object
+      properties:
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesData'
+        startDate:
+          type: string
+        endDate:
+          type: string
+        granularity:
+          $ref: '#/components/schemas/TimeSeriesGranularity'
+      required: [series, startDate, endDate, granularity]
+    MultiMetricRequest:
+      type: object
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesMetricType'
+        granularity:
+          $ref: '#/components/schemas/TimeSeriesGranularity'
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [metrics, granularity, startDate, endDate]
+    ProviderTimeSeriesResponse:
+      type: object
+      properties:
+        providerId:
+          type: integer
+          nullable: true
+        providerName:
+          type: string
+        metric:
+          $ref: '#/components/schemas/TimeSeriesMetricType'
+        data:
+          $ref: '#/components/schemas/TimeSeriesData'
+      required: [providerName, metric, data]
+    VendorTimeSeriesResponse:
+      type: object
+      properties:
+        vendorId:
+          type: integer
+          nullable: true
+        vendorName:
+          type: string
+        metric:
+          $ref: '#/components/schemas/TimeSeriesMetricType'
+        data:
+          $ref: '#/components/schemas/TimeSeriesData'
+      required: [vendorName, metric, data]
+    MetricInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        unit:
+          type: string
+        aggregatable:
+          type: boolean
+      required: [name, displayName, description, unit, aggregatable]
+    GranularityInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        maxRange:
+          type: integer
+      required: [name, displayName, maxRange]
+    DailyBreakdownResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DailyReportRow'
+        summary:
+          $ref: '#/components/schemas/PeriodSummary'
+        comparison:
+          $ref: '#/components/schemas/PeriodComparison'
+        metadata:
+          $ref: '#/components/schemas/ReportMetadata'
+      required: [data, metadata]
+    DailyReportRow:
+      type: object
+      properties:
+        date:
+          type: string
+        deposits:
+          $ref: '#/components/schemas/FinancialMetric'
+        withdrawals:
+          $ref: '#/components/schemas/FinancialMetric'
+        ggr:
+          type: number
+        ngr:
+          type: number
+        holdPercentage:
+          type: number
+        totalBets:
+          type: number
+        totalWins:
+          type: number
+        betCount:
+          type: integer
+        avgBetSize:
+          type: number
+        rtp:
+          type: number
+        newRegistrations:
+          type: integer
+        ftdCount:
+          type: integer
+        ftdTotal:
+          type: number
+        avgFtd:
+          type: number
+        activePlayers:
+          type: integer
+        uniqueGamePlayers:
+          type: integer
+        totalBonusIssued:
+          type: number
+        totalBonusWagered:
+          type: number
+        bonusConversionRate:
+          type: number
+        totalSessions:
+          type: integer
+        avgSessionDuration:
+          type: integer
+        formattedSessionDuration:
+          type: string
+          nullable: true
+        depositWithdrawalRatio:
+          type: number
+          nullable: true
+        avgPlayerValue:
+          type: number
+          nullable: true
+        ftdConversionRate:
+          type: number
+          nullable: true
+        isProfitable:
+          type: boolean
+      required: [date, deposits, withdrawals, ggr, ngr, holdPercentage, totalBets, totalWins, betCount, avgBetSize, rtp, newRegistrations, ftdCount, ftdTotal, avgFtd, activePlayers, uniqueGamePlayers, totalBonusIssued, totalBonusWagered, bonusConversionRate, totalSessions, avgSessionDuration, isProfitable]
+    FinancialMetric:
+      type: object
+      properties:
+        amount:
+          type: number
+        count:
+          type: integer
+        average:
+          type: number
+        uniqueUsers:
+          type: integer
+          nullable: true
+      required: [amount, count, average]
+    PeriodSummary:
+      type: object
+      properties:
+        totalDays:
+          type: integer
+        dateRange:
+          $ref: '#/components/schemas/DateRange'
+        totals:
+          $ref: '#/components/schemas/MetricTotals'
+        averages:
+          $ref: '#/components/schemas/MetricAverages'
+        peaks:
+          $ref: '#/components/schemas/MetricPeaks'
+      required: [totalDays, dateRange, totals, averages, peaks]
+    DateRange:
+      type: object
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [startDate, endDate]
+    MetricTotals:
+      type: object
+      properties:
+        totalDeposits:
+          type: number
+        totalWithdrawals:
+          type: number
+        totalGGR:
+          type: number
+        totalNGR:
+          type: number
+        totalBets:
+          type: number
+        totalWins:
+          type: number
+        totalBetCount:
+          type: integer
+        totalNewRegistrations:
+          type: integer
+        totalFTD:
+          type: integer
+        totalBonusIssued:
+          type: number
+        totalBonusWagered:
+          type: number
+        totalSessions:
+          type: integer
+      required: [totalDeposits, totalWithdrawals, totalGGR, totalNGR, totalBets, totalWins, totalBetCount, totalNewRegistrations, totalFTD, totalBonusIssued, totalBonusWagered, totalSessions]
+    MetricAverages:
+      type: object
+      properties:
+        avgDailyDeposits:
+          type: number
+        avgDailyWithdrawals:
+          type: number
+        avgDailyGGR:
+          type: number
+        avgDailyNGR:
+          type: number
+        avgBetSize:
+          type: number
+        avgHoldPercentage:
+          type: number
+        avgRTP:
+          type: number
+        avgDailyActivePlayers:
+          type: number
+        avgSessionDuration:
+          type: integer
+        avgPlayerValue:
+          type: number
+      required: [avgDailyDeposits, avgDailyWithdrawals, avgDailyGGR, avgDailyNGR, avgBetSize, avgHoldPercentage, avgRTP, avgDailyActivePlayers, avgSessionDuration, avgPlayerValue]
+    MetricPeaks:
+      type: object
+      properties:
+        peakDeposits:
+          $ref: '#/components/schemas/PeakInfo'
+        peakWithdrawals:
+          $ref: '#/components/schemas/PeakInfo'
+        peakGGR:
+          $ref: '#/components/schemas/PeakInfo'
+        peakActivePlayers:
+          $ref: '#/components/schemas/PeakInfo'
+        peakNewRegistrations:
+          $ref: '#/components/schemas/PeakInfo'
+      required: [peakDeposits, peakWithdrawals, peakGGR, peakActivePlayers, peakNewRegistrations]
+    PeakInfo:
+      type: object
+      properties:
+        date:
+          type: string
+        value:
+          type: number
+      required: [date, value]
+    PeriodComparison:
+      type: object
+      properties:
+        previousPeriod:
+          $ref: '#/components/schemas/DateRange'
+        currentPeriod:
+          $ref: '#/components/schemas/DateRange'
+        changes:
+          type: object
+        trend:
+          $ref: '#/components/schemas/TrendDirection'
+      required: [previousPeriod, currentPeriod, changes, trend]
+    PercentageChange:
+      type: object
+      properties:
+        previousValue:
+          type: number
+        currentValue:
+          type: number
+        absoluteChange:
+          type: number
+        percentageChange:
+          type: number
+        direction:
+          $ref: '#/components/schemas/TrendDirection'
+      required: [previousValue, currentValue, absoluteChange, percentageChange, direction]
+    ReportMetadata:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+        reportType:
+          type: string
+        totalRecords:
+          type: integer
+        dateRange:
+          $ref: '#/components/schemas/DateRange'
+        currency:
+          type: string
+        timezone:
+          type: string
+      required: [generatedAt, reportType, totalRecords, dateRange, currency, timezone]
+    DailyBreakdownExportRequest:
+      type: object
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+        format:
+          $ref: '#/components/schemas/ExportFormat'
+        includeCharts:
+          type: boolean
+        includeSummary:
+          type: boolean
+        includeComparison:
+          type: boolean
+      required: [startDate, endDate, format]
+    DailyBreakdownSummaryCard:
+      type: object
+      properties:
+        title:
+          type: string
+        value:
+          type: number
+        change:
+          type: number
+          nullable: true
+        changePercentage:
+          type: number
+          nullable: true
+        trend:
+          $ref: '#/components/schemas/TrendDirection'
+        icon:
+          type: string
+          nullable: true
+        color:
+          type: string
+          nullable: true
+      required: [title, value]
+    SummaryStatisticsResponse:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/ReportPeriodInfo'
+        totalDeposits:
+          type: number
+        totalWithdrawals:
+          type: number
+        ggr:
+          type: number
+        ngr:
+          type: number
+        newRegistrations:
+          type: integer
+        ftdCount:
+          type: integer
+        ftdConversionRate:
+          type: number
+        activePlayers:
+          type: integer
+        depositsChange:
+          type: number
+        ggrChange:
+          type: number
+      required: [period, totalDeposits, totalWithdrawals, ggr, ngr, newRegistrations, ftdCount, ftdConversionRate, activePlayers, depositsChange, ggrChange]
+    ReportPeriodInfo:
+      type: object
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [startDate, endDate]
+    RecalculationResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        period:
+          $ref: '#/components/schemas/ReportPeriodInfo'
+        metricsCalculated:
+          type: object
+      required: [status, message, period, metricsCalculated]
+    ScheduleReportRequest:
+      type: object
+      properties:
+        reportType:
+          type: string
+        frequency:
+          $ref: '#/components/schemas/ReportFrequency'
+        recipients:
+          type: array
+          items:
+            type: string
+        format:
+          type: string
+        includeCharts:
+          type: boolean
+        parameters:
+          type: object
+      required: [reportType, frequency, recipients, format]
+    ScheduleReportResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        reportType:
+          type: string
+        frequency:
+          $ref: '#/components/schemas/ReportFrequency'
+        nextRun:
+          type: string
+        status:
+          type: string
+      required: [id, reportType, frequency, nextRun, status]
+    ExportFormatInfo:
+      type: object
+      properties:
+        format:
+          type: string
+        mimeType:
+          type: string
+        extension:
+          type: string
+        description:
+          type: string
+        supportsCharts:
+          type: boolean
+        supportsMultipleDatasets:
+          type: boolean
+        available:
+          type: boolean
+      required: [format, mimeType, extension, description, supportsCharts, supportsMultipleDatasets]
+    ExportHistoryResponse:
+      type: object
+      properties:
+        exports:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExportHistoryItem'
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+        currentPage:
+          type: integer
+      required: [exports, totalElements, totalPages, currentPage]
+    ExportHistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        exportDate:
+          type: string
+        reportType:
+          type: string
+        format:
+          type: string
+        exportedBy:
+          type: string
+        status:
+          type: string
+        fileSize:
+          type: integer
+      required: [id, exportDate, reportType, format, exportedBy, status, fileSize]
+    GameAnalyticsResponse:
+      type: object
+      properties:
+        gameId:
+          type: string
+        countryCode:
+          type: string
+          nullable: true
+        startDate:
+          type: string
+        endDate:
+          type: string
+        analytics:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameAnalyticsItem'
+      required: [gameId, startDate, endDate, analytics]
+    GameAnalyticsItem:
+      type: object
+      properties:
+        date:
+          type: string
+        sessionCount:
+          type: integer
+        uniquePlayerCount:
+          type: integer
+        totalBets:
+          type: number
+        totalWins:
+          type: number
+        totalRounds:
+          type: integer
+        averageBet:
+          type: number
+          nullable: true
+        averageSessionDuration:
+          type: integer
+          nullable: true
+        rtp:
+          type: number
+          nullable: true
+        conversionRate:
+          type: number
+          nullable: true
+      required: [date, sessionCount, uniquePlayerCount, totalBets, totalWins, totalRounds]
+    ProviderAnalyticsResponse:
+      type: object
+      properties:
+        providerId:
+          type: integer
+        startDate:
+          type: string
+        endDate:
+          type: string
+        analytics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderAnalyticsItem'
+      required: [providerId, startDate, endDate, analytics]
+    ProviderAnalyticsItem:
+      type: object
+      properties:
+        date:
+          type: string
+        gameCount:
+          type: integer
+        activeGameCount:
+          type: integer
+        sessionCount:
+          type: integer
+        uniquePlayerCount:
+          type: integer
+        totalBets:
+          type: number
+        totalWins:
+          type: number
+        totalRounds:
+          type: integer
+        uptimePercentage:
+          type: number
+          nullable: true
+        averageRtp:
+          type: number
+          nullable: true
+        errorCount:
+          type: integer
+      required: [date, gameCount, activeGameCount, sessionCount, uniquePlayerCount, totalBets, totalWins, totalRounds, errorCount]
+    TimeSeriesMetricType:
+      type: string
+      enum:
+        - DEPOSITS
+        - WITHDRAWALS
+        - GGR
+        - NGR
+        - REGISTRATIONS
+        - FTD
+        - ACTIVE_PLAYERS
+        - DEPOSIT_COUNT
+        - WITHDRAWAL_COUNT
+        - AVG_DEPOSIT
+        - AVG_WITHDRAWAL
+    TimeSeriesGranularity:
+      type: string
+      enum:
+        - HOURLY
+        - DAILY
+        - WEEKLY
+        - MONTHLY
+    RankingType:
+      type: string
+      enum: [TOP_DEPOSITOR, TOP_WINNER, TOP_LOSER]
+    PeriodType:
+      type: string
+      enum: [DAILY, WEEKLY, MONTHLY, YEARLY]
+    CacheType:
+      type: string
+      enum: [DASHBOARD, RANKINGS, PROVIDERS, FTD, ALL]
+    TrendDirection:
+      type: string
+      enum: [UP, DOWN, STABLE]
+    ExportFormat:
+      type: string
+      enum: [CSV, EXCEL]
+    ReportFrequency:
+      type: string
+      enum: [DAILY, WEEKLY, MONTHLY]

@@ -1,0 +1,234 @@
+openapi: 3.0.3
+info:
+  title: Cellxpert Integration API
+  version: 1.0.0
+  description: Cellxpert affiliate integration endpoints derived from casino-b code.
+servers:
+  - url: /
+paths:
+  /api/v1/cellxpert/players:
+    get:
+      summary: Get players for Cellxpert sync
+      security:
+        - cellxpertApiKey: []
+      parameters:
+        - name: registrationDateFrom
+          in: query
+          schema:
+            type: string
+          required: false
+        - name: registrationDateTo
+          in: query
+          schema:
+            type: string
+          required: false
+        - name: lastModifiedDateFrom
+          in: query
+          schema:
+            type: string
+          required: false
+        - name: lastModifiedDateTo
+          in: query
+          schema:
+            type: string
+          required: false
+        - name: playerId
+          in: query
+          schema:
+            type: integer
+            format: int64
+          required: false
+        - name: affId
+          in: query
+          schema:
+            type: string
+          required: false
+      responses:
+        '200':
+          description: Player list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CellxpertPlayerResponse'
+  /api/v1/cellxpert/transactions:
+    get:
+      summary: Get transactions for Cellxpert sync
+      security:
+        - cellxpertApiKey: []
+      parameters:
+        - name: transactionDateFrom
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: transactionDateTo
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: playerId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CellxpertTransactionResponse'
+  /api/v1/cellxpert/activities:
+    get:
+      summary: Get activities for Cellxpert sync
+      security:
+        - cellxpertApiKey: []
+      parameters:
+        - name: activityCloseDateFrom
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: activityCloseDateTo
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: playerId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Activity list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CellxpertActivityResponse'
+  /api/v1/cellxpert/health:
+    get:
+      summary: Health check
+      security:
+        - cellxpertApiKey: []
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/cellxpert/refresh-activities:
+    post:
+      summary: Refresh activities materialized view
+      security:
+        - cellxpertApiKey: []
+      responses:
+        '200':
+          description: Refresh initiated
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    cellxpertApiKey:
+      type: apiKey
+      in: header
+      name: X-Cellxpert-API-Key
+  schemas:
+    CellxpertPlayerResponse:
+      type: object
+      properties:
+        player_id:
+          type: integer
+          format: int64
+        CXD:
+          type: string
+        AffId:
+          type: string
+          nullable: true
+        Status:
+          type: string
+          nullable: true
+        RegistrationDate:
+          type: string
+        LastModifiedDate:
+          type: string
+        ISOCountry:
+          type: string
+        UserIPAddress:
+          type: string
+          nullable: true
+        FirstDepositDate:
+          type: string
+          nullable: true
+        FirstDepositAmount:
+          type: number
+          nullable: true
+        FirstDepositCurrency:
+          type: string
+          nullable: true
+        TotalDepositAmount:
+          type: number
+          nullable: true
+        DepositCount:
+          type: integer
+          nullable: true
+        TotalWithdrawalAmount:
+          type: number
+          nullable: true
+        WithdrawalCount:
+          type: integer
+          nullable: true
+        NetDeposit:
+          type: number
+          nullable: true
+        PrimaryCurrency:
+          type: string
+          nullable: true
+      required: [player_id, CXD, RegistrationDate, LastModifiedDate, ISOCountry]
+    CellxpertTransactionResponse:
+      type: object
+      properties:
+        player_id:
+          type: integer
+          format: int64
+        transaction_id:
+          type: string
+        transaction_Date:
+          type: string
+        transaction_type:
+          type: string
+        transaction_amount:
+          type: number
+        transaction_currency:
+          type: string
+      required: [player_id, transaction_id, transaction_Date, transaction_type, transaction_amount, transaction_currency]
+    CellxpertActivityResponse:
+      type: object
+      properties:
+        player_id:
+          type: integer
+          format: int64
+        activity_date:
+          type: string
+        bets:
+          type: number
+        bonus:
+          type: number
+        revenue:
+          type: number
+        stake:
+          type: number
+        activity_currency:
+          type: string
+      required: [player_id, activity_date, bets, bonus, revenue, stake, activity_currency]

@@ -1,0 +1,190 @@
+openapi: 3.0.3
+info:
+  title: Smartico Integration API
+  version: 1.0.0
+  description: Smartico integration endpoints derived from casino-b code.
+servers:
+  - url: /
+paths:
+  /api/v1/smartico/bonuses/active:
+    get:
+      summary: Get active bonuses
+      security:
+        - smarticoApiKey: []
+      responses:
+        '200':
+          description: Active bonus list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveBonusListResponse'
+        '401':
+          description: Missing or invalid API key
+  /api/v1/smartico/bonuses/activate:
+    post:
+      summary: Activate bonus for a player
+      security:
+        - smarticoApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateBonusRequest'
+      responses:
+        '200':
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivateBonusResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Active bonus conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/integration/smartico/games:
+    get:
+      summary: Get all games for Smartico
+      responses:
+        '200':
+          description: Game list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SmarticoGameResponse'
+components:
+  securitySchemes:
+    smarticoApiKey:
+      type: apiKey
+      in: header
+      name: X-Smartico-API-Key
+  schemas:
+    ActiveBonusListResponse:
+      type: object
+      properties:
+        bonuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimpleBonusInfo'
+      required: [bonuses]
+    SimpleBonusInfo:
+      type: object
+      properties:
+        bonusId:
+          type: integer
+          format: int64
+        bonusName:
+          type: string
+      required: [bonusId, bonusName]
+    ActivateBonusRequest:
+      type: object
+      properties:
+        bonusId:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        amount:
+          type: number
+      required: [bonusId, userId, amount]
+    ActivateBonusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        awardId:
+          type: integer
+          format: int64
+          nullable: true
+        playerId:
+          type: integer
+          format: int64
+        bonusId:
+          type: integer
+          format: int64
+        bonusName:
+          type: string
+        awardedAmount:
+          type: number
+        currency:
+          type: string
+        wageringRequirement:
+          type: number
+          nullable: true
+        expiresAt:
+          type: string
+          nullable: true
+        depositedToRealBalance:
+          type: boolean
+      required:
+        - success
+        - message
+        - playerId
+        - bonusId
+        - bonusName
+        - awardedAmount
+        - currency
+        - depositedToRealBalance
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        error:
+          type: string
+      required: [success, message, error]
+    SmarticoGameCategoryResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+      required: [id, name]
+    SmarticoGameResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        link:
+          type: string
+        image:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        game_categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmarticoGameCategoryResponse'
+        game_provider:
+          type: string
+        game_provider_id:
+          type: integer
+          format: int64
+          nullable: true
+      required: [id, name, link, enabled, game_categories, game_provider]

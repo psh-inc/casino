@@ -1,0 +1,576 @@
+openapi: 3.0.3
+info:
+  title: Casino Provider Callback API
+  version: 1.0.0
+  description: Provider wallet callback API derived from casino-b code.
+servers:
+  - url: /
+paths:
+  /api/v1/provider/{provider}/authenticate:
+    post:
+      summary: Provider authenticate
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json;charset=UTF-8:
+            schema:
+              $ref: '#/components/schemas/ProviderAuthenticateRequest'
+      responses:
+        '200':
+          description: Provider authenticate response
+          content:
+            application/json;charset=UTF-8:
+              schema:
+                $ref: '#/components/schemas/ProviderAuthenticateResponse'
+  /api/v1/provider/{provider}/balance:
+    post:
+      summary: Provider balance
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json;charset=UTF-8:
+            schema:
+              $ref: '#/components/schemas/ProviderBalanceRequest'
+      responses:
+        '200':
+          description: Provider balance response
+          content:
+            application/json;charset=UTF-8:
+              schema:
+                $ref: '#/components/schemas/ProviderBalanceResponse'
+  /api/v1/provider/{provider}/changebalance:
+    post:
+      summary: Provider change balance
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json;charset=UTF-8:
+            schema:
+              $ref: '#/components/schemas/ProviderChangeBalanceRequest'
+      responses:
+        '200':
+          description: Provider change balance response
+          content:
+            application/json;charset=UTF-8:
+              schema:
+                $ref: '#/components/schemas/ProviderChangeBalanceResponse'
+  /api/v1/provider/{provider}/status:
+    post:
+      summary: Provider transaction status
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json;charset=UTF-8:
+            schema:
+              $ref: '#/components/schemas/ProviderTransactionStatusRequest'
+      responses:
+        '200':
+          description: Provider transaction status response
+          content:
+            application/json;charset=UTF-8:
+              schema:
+                $ref: '#/components/schemas/ProviderTransactionStatusResponse'
+  /api/v1/provider/{provider}/cancel:
+    post:
+      summary: Provider cancel transaction
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json;charset=UTF-8:
+            schema:
+              $ref: '#/components/schemas/ProviderCancelTransactionRequest'
+      responses:
+        '200':
+          description: Provider cancel transaction response
+          content:
+            application/json;charset=UTF-8:
+              schema:
+                $ref: '#/components/schemas/ProviderCancelTransactionResponse'
+  /api/v1/provider/{provider}/finishround:
+    post:
+      summary: Provider finish round
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json;charset=UTF-8:
+            schema:
+              $ref: '#/components/schemas/ProviderFinishRoundRequest'
+      responses:
+        '200':
+          description: Provider finish round response
+          content:
+            application/json;charset=UTF-8:
+              schema:
+                $ref: '#/components/schemas/ProviderFinishRoundResponse'
+  /api/v1/provider/{provider}/ping:
+    get:
+      summary: Provider ping
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ping response
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    ProviderErrorCode:
+      type: string
+      enum:
+        - OP_20
+        - OP_21
+        - OP_22
+        - OP_30
+        - OP_31
+        - OP_32
+        - OP_33
+        - OP_34
+        - OP_35
+        - OP_40
+        - OP_41
+        - OP_47
+        - OP_49
+        - OP_50
+    ProviderErrorData:
+      type: object
+      properties:
+        error_code:
+          $ref: '#/components/schemas/ProviderErrorCode'
+        error_message:
+          type: string
+      required: [error_code, error_message]
+    ProviderApiRequestBase:
+      type: object
+      properties:
+        command:
+          type: string
+        request_timestamp:
+          type: string
+        hash:
+          type: string
+      required: [command, request_timestamp, hash]
+    ProviderResponsePayloadBase:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [OK, ERROR]
+        response_timestamp:
+          type: string
+        hash:
+          type: string
+      required: [status, response_timestamp, hash]
+    ProviderAuthenticateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProviderApiRequestBase'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ProviderAuthenticateRequestData'
+          required: [data]
+    ProviderAuthenticateRequestData:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 20
+          maxLength: 50
+      required: [token]
+    ProviderAuthenticateResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/ProviderAuthenticateRequest'
+        response:
+          $ref: '#/components/schemas/ProviderAuthenticateResponsePayload'
+      required: [request, response]
+    ProviderAuthenticateResponsePayload:
+      allOf:
+        - $ref: '#/components/schemas/ProviderResponsePayloadBase'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/ProviderAuthenticateResponseData'
+                - $ref: '#/components/schemas/ProviderErrorData'
+    ProviderAuthenticateResponseData:
+      type: object
+      properties:
+        user_id:
+          type: string
+        user_name:
+          type: string
+        user_country:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+        group:
+          type: string
+          nullable: true
+        currency_code:
+          type: string
+        balance:
+          type: number
+      required: [user_id, user_name, user_country, currency_code, balance]
+    ProviderBalanceRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProviderApiRequestBase'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ProviderBalanceRequestData'
+          required: [data]
+    ProviderBalanceRequestData:
+      type: object
+      properties:
+        token:
+          type: string
+          maxLength: 50
+        currency_code:
+          type: string
+          maxLength: 4
+        user_id:
+          type: string
+          maxLength: 70
+      required: [token, currency_code, user_id]
+    ProviderBalanceResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/ProviderBalanceRequest'
+        response:
+          $ref: '#/components/schemas/ProviderBalanceResponsePayload'
+      required: [request, response]
+    ProviderBalanceResponsePayload:
+      allOf:
+        - $ref: '#/components/schemas/ProviderResponsePayloadBase'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/ProviderBalanceResponseData'
+                - $ref: '#/components/schemas/ProviderErrorData'
+    ProviderBalanceResponseData:
+      type: object
+      properties:
+        balance:
+          type: number
+        currency_code:
+          type: string
+      required: [balance, currency_code]
+    ProviderChangeBalanceRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProviderApiRequestBase'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ProviderChangeBalanceRequestData'
+          required: [data]
+    ProviderChangeBalanceRequestData:
+      type: object
+      properties:
+        token:
+          type: string
+          maxLength: 50
+          nullable: true
+        user_id:
+          type: string
+          maxLength: 70
+        transaction_type:
+          type: string
+          enum: [BET, WIN, REFUND]
+        transaction_id:
+          type: integer
+          format: int64
+        round_id:
+          type: integer
+          format: int64
+        round_finished:
+          type: boolean
+          nullable: true
+        game_id:
+          type: integer
+        currency_code:
+          type: string
+          maxLength: 4
+        amount:
+          type: number
+        transaction_timestamp:
+          type: string
+        context:
+          $ref: '#/components/schemas/ProviderChangeBalanceContextData'
+      required:
+        - user_id
+        - transaction_type
+        - transaction_id
+        - round_id
+        - game_id
+        - currency_code
+        - amount
+        - transaction_timestamp
+    ProviderChangeBalanceContextData:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+        rake:
+          type: number
+          nullable: true
+        history_id:
+          type: string
+          nullable: true
+        game_details:
+          $ref: '#/components/schemas/GameDetailsData'
+        campaign_code:
+          type: string
+          nullable: true
+        campaign_details:
+          description: Can be object, array, or string.
+          nullable: true
+        urid:
+          type: string
+          nullable: true
+    GameDetailsData:
+      type: object
+      properties:
+        ticket_id:
+          type: integer
+          format: int64
+          nullable: true
+    ProviderChangeBalanceResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/ProviderChangeBalanceRequest'
+        response:
+          $ref: '#/components/schemas/ProviderChangeBalanceResponsePayload'
+      required: [request, response]
+    ProviderChangeBalanceResponsePayload:
+      allOf:
+        - $ref: '#/components/schemas/ProviderResponsePayloadBase'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/ProviderChangeBalanceResponseData'
+                - $ref: '#/components/schemas/ProviderErrorData'
+    ProviderChangeBalanceResponseData:
+      type: object
+      properties:
+        currency_code:
+          type: string
+        balance:
+          type: number
+      required: [currency_code, balance]
+    ProviderTransactionStatusRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProviderApiRequestBase'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ProviderTransactionStatusRequestData'
+          required: [data]
+    ProviderTransactionStatusRequestData:
+      type: object
+      properties:
+        user_id:
+          type: string
+          maxLength: 70
+        transaction_id:
+          type: integer
+          format: int64
+        transaction_type:
+          type: string
+          enum: [BET, WIN, REFUND]
+        transaction_date:
+          type: string
+        transaction_ts:
+          type: string
+        round_id:
+          type: integer
+          format: int64
+      required:
+        - user_id
+        - transaction_id
+        - transaction_type
+        - transaction_date
+        - transaction_ts
+        - round_id
+    ProviderTransactionStatusResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/ProviderTransactionStatusRequest'
+        response:
+          $ref: '#/components/schemas/ProviderTransactionStatusResponsePayload'
+      required: [request, response]
+    ProviderTransactionStatusResponsePayload:
+      allOf:
+        - $ref: '#/components/schemas/ProviderResponsePayloadBase'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/ProviderTransactionStatusResponseData'
+                - $ref: '#/components/schemas/ProviderErrorData'
+    ProviderTransactionStatusResponseData:
+      type: object
+      properties:
+        user_id:
+          type: string
+        transaction_id:
+          type: integer
+          format: int64
+        transaction_status:
+          type: string
+      required: [user_id, transaction_id, transaction_status]
+    ProviderCancelTransactionRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProviderApiRequestBase'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ProviderCancelTransactionRequestData'
+          required: [data]
+    ProviderCancelTransactionRequestData:
+      type: object
+      properties:
+        user_id:
+          type: string
+          maxLength: 70
+        transaction_id:
+          type: integer
+          format: int64
+        round_id:
+          type: integer
+          format: int64
+        round_finished:
+          type: boolean
+          nullable: true
+        game_id:
+          type: integer
+      required: [user_id, transaction_id, round_id, game_id]
+    ProviderCancelTransactionResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/ProviderCancelTransactionRequest'
+        response:
+          $ref: '#/components/schemas/ProviderCancelTransactionResponsePayload'
+      required: [request, response]
+    ProviderCancelTransactionResponsePayload:
+      allOf:
+        - $ref: '#/components/schemas/ProviderResponsePayloadBase'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/ProviderCancelTransactionResponseData'
+                - $ref: '#/components/schemas/ProviderErrorData'
+    ProviderCancelTransactionResponseData:
+      type: object
+      properties:
+        user_id:
+          type: string
+        transaction_id:
+          type: integer
+          format: int64
+        transaction_status:
+          type: string
+      required: [user_id, transaction_id, transaction_status]
+    ProviderFinishRoundRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProviderApiRequestBase'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ProviderFinishRoundRequestData'
+          required: [data]
+    ProviderFinishRoundRequestData:
+      type: object
+      properties:
+        round_id:
+          type: integer
+          format: int64
+        user_id:
+          type: string
+          maxLength: 70
+        game_id:
+          type: integer
+        round_date:
+          type: string
+        round_ts:
+          type: string
+      required: [round_id, user_id, game_id, round_date, round_ts]
+    ProviderFinishRoundResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/ProviderFinishRoundRequest'
+        response:
+          $ref: '#/components/schemas/ProviderFinishRoundResponsePayload'
+      required: [request, response]
+    ProviderFinishRoundResponsePayload:
+      allOf:
+        - $ref: '#/components/schemas/ProviderResponsePayloadBase'
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: '#/components/schemas/ProviderFinishRoundResponseData'
+                - $ref: '#/components/schemas/ProviderErrorData'
+    ProviderFinishRoundResponseData:
+      type: object
+      properties:
+        round_id:
+          type: integer
+          format: int64
+        user_id:
+          type: string
+        game_id:
+          type: integer
+      required: [round_id, user_id, game_id]
